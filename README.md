@@ -1,54 +1,63 @@
 ﻿# EV Battery Manager
 
-This repository includes a physics-based EV battery simulator and an AI-driven Battery Management System (BMS) controller for SOC-aware safety limiting.
+This project combines:
+- A physics-based EV battery simulator.
+- An AI-driven BMS controller trained on telemetry data.
+- Live Flask and Streamlit dashboards for SOC, charging/discharging state, and active safety limits.
 
-## Simulated BMS (CLI)
-
-Run the standalone simulator:
+## 1) Train The Improved SOC Model
 
 ```bash
-python simulated_bms.py --duration 1200 --dt 1 --log-interval 30 --series-cells 12 --parallel-groups 40 --ai-model bms_lstm_model.keras --ai-x-scaler x_scaler.pkl --ai-y-scaler y_scaler.pkl --csv bms_simulation_log.csv
+python train_soc_model.py
 ```
 
-What it does:
-- Simulates battery cell voltage, SOC, temperature, SOH, and pack behavior.
-- Uses an AI model to estimate SOC and feed BMS control logic.
-- Applies safety limits for voltage, temperature, SOC, and current.
-- Logs live telemetry and writes CSV output.
+This training pipeline:
+- Uses `distributed_bms_dataset.csv` as the real-world telemetry reference dataset.
+- Builds lag/rolling time-series features.
+- Tries multiple model candidates until the RMSE target is met.
+- Saves:
+  - `models/soc_model_v2.joblib`
+  - `models/soc_model_v2_metrics.json`
 
-## Live Flask Dashboard
+Current result in this repo:
+- RMSE: `0.228%`
+- MAE: `0.185%`
 
-Run backend + web frontend:
+## 2) Run Live Flask Dashboard
 
 ```bash
 python app.py
 ```
 
-Open:
+Open `http://127.0.0.1:5000`
 
-`http://127.0.0.1:5000`
+What it shows:
+- Simulated EV battery telemetry (voltage/current/power/temp/SOH/SOC).
+- AI SOC estimate vs true simulated SOC.
+- Charging / discharging / idle state.
+- Safety limiting reasons (`VOLTAGE`, `TEMPERATURE`, `SOC`) and current windows.
 
-Dashboard capabilities:
-- Live EV battery telemetry (voltage, current, power, SOC, SOH, temperature).
-- AI SOC vs true SOC visualization.
-- Charging/discharging state.
-- Safety-limiting reason display (`VOLTAGE`, `TEMPERATURE`, `SOC`).
-- Scenario triggers for demonstration of BMS protections.
-
-## Streamlit App
-
-Run locally:
+## 3) Run Streamlit Dashboard
 
 ```bash
 streamlit run streamlit_app.py
 ```
 
-## Deploy to Streamlit Community Cloud
+## 4) Dataset-Based Simulation
+
+`live_simulator.py` uses `distributed_bms_dataset.csv` to drive realistic behavior:
+- Ambient temperature trace.
+- Current/load profile.
+- Converter command and latency profile.
+
+Battery state still evolves through the physics model (SOC/voltage/thermal), while BMS control decisions are AI-driven using the trained model artifact.
+
+## 5) Deploy to Streamlit Community Cloud
 
 1. Push this repo to GitHub.
 2. Open [https://share.streamlit.io](https://share.streamlit.io).
-3. Create a new app with:
+3. Create a new app:
    - Repository: `Nilay-11/BMS-file-manager`
    - Branch: `main`
-   - Main file path: `streamlit_app.py`
+   - Main file: `streamlit_app.py`
 4. Deploy.

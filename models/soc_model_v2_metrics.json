@@ -1,0 +1,12 @@
+{
+  "dataset_rows": 588,
+  "train_rows": 468,
+  "test_rows": 120,
+  "best_model": "ridge",
+  "rmse_pct": 0.22798112513272453,
+  "mae_pct": 0.1848038444014436,
+  "target_rmse_pct": 3.0,
+  "target_met": true,
+  "trials_run": 1,
+  "feature_count": 25
+}

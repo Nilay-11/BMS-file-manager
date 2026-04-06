@@ -9,12 +9,8 @@ from typing import List, Optional
 
 import numpy as np
 
-try:
-    import joblib
-    import tensorflow as tf
-except Exception:  # pragma: no cover
-    joblib = None
-    tf = None
+joblib = None
+tf = None
 
 
 def clamp(value: float, lower: float, upper: float) -> float:
@@ -32,8 +28,29 @@ class AISOCModel:
     y_scaler: object = field(init=False, default=None)
     input_feature_count: int = field(init=False, default=3)
     history: List[np.ndarray] = field(default_factory=list, init=False)
+    previous_soc_pct: Optional[float] = field(default=None, init=False)
+    smoothing_alpha: float = 0.15
 
     def __post_init__(self) -> None:
+        global tf, joblib
+        if tf is None:
+            try:
+                import tensorflow as _tf
+
+                tf = _tf
+            except Exception as exc:
+                raise RuntimeError(
+                    "TensorFlow is unavailable, so AI BMS control cannot start. Install dependencies first."
+                ) from exc
+
+        if joblib is None:
+            try:
+                import joblib as _joblib
+
+                joblib = _joblib
+            except Exception:
+                joblib = None
+
         if tf is None:
             raise RuntimeError(
                 "TensorFlow is unavailable, so AI BMS control cannot start. Install dependencies first."
@@ -138,6 +155,14 @@ class AISOCModel:
             soc = float(pred[0][0])
         if soc <= 1.0:
             soc *= 100.0
+        soc = clamp(soc, 0.0, 100.0)
+        if self.previous_soc_pct is None:
+            self.previous_soc_pct = soc
+            return soc
+        soc = (1.0 - self.smoothing_alpha) * self.previous_soc_pct + (
+            self.smoothing_alpha * soc
+        )
+        self.previous_soc_pct = soc
         return clamp(soc, 0.0, 100.0)
 
 
@@ -153,7 +178,8 @@ class BatteryCell:
 
     def ocv(self) -> float:
         soc = clamp(self.soc, 0.0, 1.0)
-        base = 3.0 + (1.2 * soc) + (0.08 * soc * (1.0 - soc))
+        # Tuned to match the provided dataset's voltage-SOC operating range.
+        base = 3.68 + (0.52 * soc) + (0.06 * math.tanh((soc - 0.35) * 4.0))
         temp_effect = -0.0015 * (25.0 - self.temperature_c)
         return clamp(base + temp_effect, 2.8, 4.25)
 
@@ -488,14 +514,16 @@ def run_simulation(
             pack.cells
         )
         sensed_temp_c = pack.max_temperature_c()
+        sensed_cell_current_a = previous_current / max(1, parallel_groups)
+        sensed_cell_power_w = sensed_avg_cell_v * sensed_cell_current_a
         ai_soc_pct = ai_soc_model.predict_soc_pct(
             avg_cell_voltage_v=sensed_avg_cell_v,
-            current_a=previous_current,
+            current_a=sensed_cell_current_a,
             temp_c=sensed_temp_c,
-            power_kw=(abs(previous_current) * sensed_avg_cell_v * series_cells) / 1000.0,
+            power_kw=sensed_cell_power_w,
             soh_pct=(sum(c.soh for c in pack.cells) / len(pack.cells)) * 100.0,
-            dt_s=dt_s,
-            latency_s=0.12,
+            dt_s=max(2.5, dt_s),
+            latency_s=0.005,
         )
 
         requested_current = drive_cycle_current(t_s, rng)

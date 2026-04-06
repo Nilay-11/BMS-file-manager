@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import math
 import random
@@ -6,7 +6,10 @@ import threading
 from dataclasses import dataclass
 from typing import Dict
 
-from simulated_bms import AISOCModel, BMSController, create_simulated_pack, drive_cycle_current
+import pandas as pd
+
+from simulated_bms import BMSController, create_simulated_pack
+from soc_ai import RealWorldSocModel
 
 
 @dataclass
@@ -14,24 +17,45 @@ class RuntimeConfig:
     dt_s: float = 1.0
     series_cells: int = 96
     parallel_groups: int = 40
-    ai_model_path: str = "bms_lstm_model.keras"
-    ai_x_scaler_path: str = "x_scaler.pkl"
-    ai_y_scaler_path: str = "y_scaler.pkl"
-    ai_sequence_length: int = 20
+    telemetry_dataset_path: str = "distributed_bms_dataset.csv"
+    soc_model_path: str = "models/soc_model_v2.joblib"
+
+
+class RealWorldDriveProfile:
+    def __init__(self, dataset_path: str, rng: random.Random) -> None:
+        df = pd.read_csv(dataset_path)
+        df["timestamp"] = pd.to_datetime(df["timestamp"], dayfirst=True)
+        self.df = df.sort_values(["module_id", "timestamp"]).reset_index(drop=True)
+        self.rng = rng
+        self.index = 0
+        self.mean_soc = float(self.df["soc_pct"].mean())
+        self.mean_soh = float(self.df["soh_pct"].mean())
+
+    def next_row(self) -> Dict[str, float]:
+        row = self.df.iloc[self.index]
+        self.index = (self.index + 1) % len(self.df)
+        return {
+            "temperature_c": float(row["Temperature"]),
+            "current_a": float(row["Current"]),
+            "power_kw": float(row["Power"]),
+            "converter_command_pct": float(row["converter_command_pct"]),
+            "latency_ms": float(row["latency_ms"]),
+            "anomaly_score_pct": float(row["anomaly_score_pct"]),
+        }
 
 
 class LiveBMSSimulator:
     def __init__(self, config: RuntimeConfig) -> None:
         self.config = config
         self.rng = random.Random(25)
+        self.profile = RealWorldDriveProfile(config.telemetry_dataset_path, self.rng)
         self.pack = create_simulated_pack(config.series_cells, config.parallel_groups, self.rng)
+        for cell in self.pack.cells:
+            cell.soc = max(0.05, min(0.95, self.profile.mean_soc / 100.0 + self.rng.uniform(-0.015, 0.015)))
+            cell.soh = max(0.75, min(1.0, self.profile.mean_soh / 100.0 + self.rng.uniform(-0.01, 0.01)))
+
         self.bms = BMSController()
-        self.ai = AISOCModel(
-            model_path=config.ai_model_path,
-            x_scaler_path=config.ai_x_scaler_path,
-            y_scaler_path=config.ai_y_scaler_path,
-            sequence_length=config.ai_sequence_length,
-        )
+        self.ai = RealWorldSocModel.load(config.soc_model_path)
         self.lock = threading.Lock()
         self.tick = 0
         self.prev_current_a = 0.0
@@ -39,12 +63,17 @@ class LiveBMSSimulator:
         self.drive_mode = "auto"
         self.latest_state: Dict[str, object] = {}
 
-    def _requested_current(self, t_s: float) -> float:
+    def _requested_current(self, profile_current_a: float) -> float:
+        base = abs(profile_current_a)
         if self.drive_mode == "charge":
-            return -75.0 + self.rng.uniform(-4.0, 4.0)
+            return -(base * 3.2 + self.rng.uniform(3.0, 8.0))
         if self.drive_mode == "discharge":
-            return 95.0 + self.rng.uniform(-5.0, 5.0)
-        return drive_cycle_current(t_s, self.rng)
+            return base * 4.2 + self.rng.uniform(4.0, 9.0)
+
+        phase = self.tick % 240
+        if 170 <= phase < 205:
+            return -(base * 1.6 + self.rng.uniform(2.0, 6.0))
+        return base * 3.8 + self.rng.uniform(-4.0, 7.0)
 
     def set_low_power_mode(self, enabled: bool) -> None:
         with self.lock:
@@ -61,7 +90,7 @@ class LiveBMSSimulator:
         with self.lock:
             if scenario == "temp_spike":
                 for cell in self.pack.cells:
-                    cell.temperature_c += 15.0
+                    cell.temperature_c += 30.0
             elif scenario == "low_voltage":
                 for cell in self.pack.cells:
                     cell.temperature_c = min(cell.temperature_c, 31.0)
@@ -79,23 +108,28 @@ class LiveBMSSimulator:
     def step(self) -> Dict[str, object]:
         with self.lock:
             t_s = self.tick * self.config.dt_s
-            ambient_c = 29.0 + 3.0 * math.sin(t_s / 900.0)
-            requested_current_a = self._requested_current(t_s)
+            profile = self.profile.next_row()
+            ambient_c = profile["temperature_c"] + 0.3 * math.sin(t_s / 240.0)
+            requested_current_a = self._requested_current(profile["current_a"])
 
             avg_cell_v = sum(cell.terminal_voltage(self.prev_current_a) for cell in self.pack.cells) / len(
                 self.pack.cells
             )
-            max_temp_c = self.pack.max_temperature_c()
+            max_temp_c = max(self.pack.max_temperature_c(), profile["temperature_c"])
             avg_soh_pct = (sum(c.soh for c in self.pack.cells) / len(self.pack.cells)) * 100.0
+            cell_current_a = self.prev_current_a / max(1, self.config.parallel_groups)
+            cell_power_kw = max(0.0, (abs(cell_current_a) * avg_cell_v) / 1000.0)
 
             ai_soc_pct = self.ai.predict_soc_pct(
-                avg_cell_voltage_v=avg_cell_v,
-                current_a=self.prev_current_a,
+                voltage_v=avg_cell_v,
+                current_a=cell_current_a,
                 temp_c=max_temp_c,
-                power_kw=(abs(self.prev_current_a) * avg_cell_v * self.config.series_cells) / 1000.0,
+                power_kw=cell_power_kw,
                 soh_pct=avg_soh_pct,
                 dt_s=self.config.dt_s,
-                latency_s=0.10 + self.rng.uniform(0.0, 0.06),
+                latency_s=max(0.001, profile["latency_ms"] / 1000.0),
+                converter_command_pct=profile["converter_command_pct"],
+                anomaly_score_pct=profile["anomaly_score_pct"],
             )
 
             command = self.bms.command(
@@ -157,15 +191,21 @@ class LiveBMSSimulator:
                     "allowed": [round(command.allowed_window_a[0], 2), round(command.allowed_window_a[1], 2)],
                 },
                 "limits_active": {
-                    "current": "CURRENT_LIMITED" in command.events,
+                    "current": ("CURRENT_LIMITED" in command.events) or command.state.startswith("FAULT_"),
                     "voltage": "VOLTAGE" in command.limiting_reasons,
-                    "temperature": "TEMPERATURE" in command.limiting_reasons,
+                    "temperature": ("TEMPERATURE" in command.limiting_reasons)
+                    or command.state.startswith("FAULT_OVER_TEMP"),
                     "soc": "SOC" in command.limiting_reasons,
                 },
                 "thresholds": {
                     "min_cell_v": self.bms.limits.min_cell_v,
                     "max_cell_v": self.bms.limits.max_cell_v,
                     "critical_temp_c": self.bms.limits.critical_temp_c,
+                },
+                "dataset_trace": {
+                    "base_current_a": round(profile["current_a"], 2),
+                    "converter_command_pct": round(profile["converter_command_pct"], 2),
+                    "latency_ms": round(profile["latency_ms"], 2),
                 },
             }
 
@@ -174,6 +214,6 @@ class LiveBMSSimulator:
 
     def get_state(self) -> Dict[str, object]:
         with self.lock:
-            if not self.latest_state:
-                return self.step()
-            return dict(self.latest_state)
+            if self.latest_state:
+                return dict(self.latest_state)
+        return self.step()
