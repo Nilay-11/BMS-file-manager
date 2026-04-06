@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EV BMS AI Safety Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #151b23;
+      --panel-2: #1b2532;
+      --text: #e8eef8;
+      --muted: #9fb0c4;
+      --ok: #2bd67b;
+      --warn: #ffb347;
+      --danger: #ff5d5d;
+      --accent: #43a6ff;
+      --line: #2b3748;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(900px 500px at 0% 0%, #17263a 0%, transparent 60%),
+        radial-gradient(800px 450px at 100% 100%, #1d2b3b 0%, transparent 60%),
+        var(--bg);
+      min-height: 100vh;
+      padding: 16px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .title {
+      margin: 0;
+      font-size: 1.25rem;
+      letter-spacing: 0.03em;
+    }
+    .sub {
+      color: var(--muted);
+      margin-top: 2px;
+      font-size: 0.88rem;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: #0f1622;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+    .pill.ok { color: var(--ok); border-color: rgba(43, 214, 123, 0.35); }
+    .pill.warn { color: var(--warn); border-color: rgba(255, 179, 71, 0.4); }
+    .pill.danger { color: var(--danger); border-color: rgba(255, 93, 93, 0.45); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 360px 1fr 360px;
+      gap: 14px;
+    }
+    @media (max-width: 1200px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: linear-gradient(160deg, var(--panel), var(--panel-2));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    }
+    .card h3 {
+      margin: 0 0 10px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+    .soc-wrap {
+      display: grid;
+      place-items: center;
+      margin: 6px 0 16px;
+    }
+    .ring {
+      width: 230px;
+      height: 230px;
+      border-radius: 50%;
+      background:
+        conic-gradient(var(--accent) 0deg, var(--accent) 0deg, #213449 0deg 360deg);
+      display: grid;
+      place-items: center;
+      transition: background 0.35s ease;
+    }
+    .ring-inner {
+      width: 188px;
+      height: 188px;
+      border-radius: 50%;
+      background: #101723;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      border: 1px solid #2a384b;
+    }
+    .soc-main {
+      font-size: 3rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .soc-label { color: var(--muted); font-size: 0.82rem; letter-spacing: 0.06em; }
+    .kv {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(159, 176, 196, 0.12);
+      font-size: 0.9rem;
+    }
+    .kv:last-child { border-bottom: none; }
+    .kv .k { color: var(--muted); }
+    .big {
+      font-size: 1.6rem;
+      font-weight: 600;
+    }
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-top: 4px;
+    }
+    .status {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: rgba(16, 23, 35, 0.66);
+    }
+    .status .label {
+      color: var(--muted);
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+    .status .value {
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .value.ok { color: var(--ok); }
+    .value.warn { color: var(--warn); }
+    .value.danger { color: var(--danger); }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .controls button {
+      background: #101926;
+      color: var(--text);
+      border: 1px solid #2f4156;
+      padding: 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 0.84rem;
+    }
+    .controls button.active {
+      border-color: var(--accent);
+      background: #152338;
+      color: #d9ecff;
+    }
+    .scenario-controls {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .scenario-controls button {
+      background: #251419;
+      color: #ffd8d8;
+      border: 1px solid #62424b;
+      padding: 9px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 0.78rem;
+    }
+    .charts {
+      display: grid;
+      grid-template-rows: 1fr 1fr;
+      gap: 14px;
+      min-height: 560px;
+    }
+    .chart-wrap { min-height: 260px; }
+    .foot {
+      margin-top: 12px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1 class="title">EV Battery Simulator + AI BMS Safety Controller</h1>
+      <div class="sub">Physics-based battery simulation with live AI SOC control and safety limit diagnostics</div>
+    </div>
+    <div id="flowBadge" class="pill ok">IDLE</div>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <h3>State of Charge</h3>
+      <div class="soc-wrap">
+        <div id="socRing" class="ring">
+          <div class="ring-inner">
+            <div id="socMain" class="soc-main">--</div>
+            <div class="soc-label">AI SOC (%)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="kv"><div class="k">True SOC (simulated)</div><div id="socTrue">--</div></div>
+      <div class="kv"><div class="k">SOC Error (AI-True)</div><div id="socErr">--</div></div>
+      <div class="kv"><div class="k">State of Health</div><div id="soh">--</div></div>
+      <div class="kv"><div class="k">Time</div><div id="simTime">--</div></div>
+
+      <h3 style="margin-top:14px;">Pack Telemetry</h3>
+      <div class="kv"><div class="k">Pack Voltage</div><div id="packV" class="big">--</div></div>
+      <div class="kv"><div class="k">Pack Current</div><div id="packI" class="big">--</div></div>
+      <div class="kv"><div class="k">Pack Power</div><div id="packP">--</div></div>
+      <div class="kv"><div class="k">Max Temperature</div><div id="tempMax">--</div></div>
+      <div class="kv"><div class="k">Cell Voltage Range</div><div id="cellRange">--</div></div>
+    </section>
+
+    <section class="charts">
+      <div class="card chart-wrap">
+        <h3>Current Demand vs BMS Command</h3>
+        <canvas id="currentChart"></canvas>
+      </div>
+      <div class="card chart-wrap">
+        <h3>SOC and Temperature</h3>
+        <canvas id="socChart"></canvas>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Safety Limit Status</h3>
+      <div class="status-grid">
+        <div class="status">
+          <div class="label">Current Limiting</div>
+          <div id="limitCurrent" class="value ok">NORMAL</div>
+        </div>
+        <div class="status">
+          <div class="label">Voltage Guard</div>
+          <div id="limitVoltage" class="value ok">SAFE</div>
+        </div>
+        <div class="status">
+          <div class="label">Temperature Guard</div>
+          <div id="limitTemp" class="value ok">SAFE</div>
+        </div>
+        <div class="status">
+          <div class="label">SOC Guard</div>
+          <div id="limitSoc" class="value ok">SAFE</div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:14px;">BMS Windows (A)</h3>
+      <div class="kv"><div class="k">Allowed</div><div id="wAllowed">--</div></div>
+      <div class="kv"><div class="k">Voltage Window</div><div id="wVoltage">--</div></div>
+      <div class="kv"><div class="k">Temp Window</div><div id="wTemp">--</div></div>
+      <div class="kv"><div class="k">SOC Window (AI)</div><div id="wSoc">--</div></div>
+      <div class="kv"><div class="k">Requested -> Commanded</div><div id="reqCmd">--</div></div>
+      <div class="kv"><div class="k">BMS Events</div><div id="events">--</div></div>
+
+      <h3 style="margin-top:14px;">Drive Mode</h3>
+      <div class="controls">
+        <button id="mode-auto">Auto</button>
+        <button id="mode-charge">Charge</button>
+        <button id="mode-discharge">Discharge</button>
+      </div>
+
+      <h3 style="margin-top:14px;">Safety Scenarios</h3>
+      <div class="scenario-controls">
+        <button id="scenario-temp">Temp Spike</button>
+        <button id="scenario-low-v">Low Voltage</button>
+        <button id="scenario-high-v">High Voltage</button>
+      </div>
+
+      <h3 style="margin-top:14px;">Power Mode</h3>
+      <div class="controls" style="grid-template-columns:1fr;">
+        <button id="toggle-lpm">Low Power: OFF</button>
+      </div>
+
+      <div class="foot">
+        This dashboard displays how AI-estimated SOC and safety windows constrain battery current
+        to protect voltage and temperature limits in real time.
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const socket = io();
+    const MAX_POINTS = 90;
+    let latestMode = "auto";
+    let lpm = false;
+
+    const history = {
+      labels: [],
+      req: [],
+      cmd: [],
+      socAi: [],
+      socTrue: [],
+      temp: []
+    };
+
+    const currentChart = new Chart(document.getElementById("currentChart").getContext("2d"), {
+      type: "line",
+      data: {
+        labels: history.labels,
+        datasets: [
+          { label: "Requested A", data: history.req, borderColor: "#f2a347", borderWidth: 2, tension: 0.25 },
+          { label: "Commanded A", data: history.cmd, borderColor: "#3fa8ff", borderWidth: 2, tension: 0.25 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c8d5e5" } } },
+        scales: {
+          x: { ticks: { color: "#a5b7cc" }, grid: { color: "rgba(165,183,204,0.12)" } },
+          y: { ticks: { color: "#a5b7cc" }, grid: { color: "rgba(165,183,204,0.12)" } }
+        }
+      }
+    });
+
+    const socChart = new Chart(document.getElementById("socChart").getContext("2d"), {
+      type: "line",
+      data: {
+        labels: history.labels,
+        datasets: [
+          { label: "AI SOC %", data: history.socAi, borderColor: "#43d998", borderWidth: 2, tension: 0.3 },
+          { label: "True SOC %", data: history.socTrue, borderColor: "#4ea1ff", borderWidth: 2, tension: 0.3 },
+          { label: "Max Temp C", data: history.temp, borderColor: "#ff7d7d", borderWidth: 2, tension: 0.3, yAxisID: "y1" }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c8d5e5" } } },
+        scales: {
+          x: { ticks: { color: "#a5b7cc" }, grid: { color: "rgba(165,183,204,0.12)" } },
+          y: { position: "left", ticks: { color: "#a5b7cc" }, grid: { color: "rgba(165,183,204,0.12)" }, min: 0, max: 100 },
+          y1: { position: "right", ticks: { color: "#f0b6b6" }, grid: { drawOnChartArea: false }, min: 0, max: 80 }
+        }
+      }
+    });
+
+    function asWindow(win) {
+      return `${win[0].toFixed(1)} to ${win[1].toFixed(1)}`;
+    }
+
+    function setStatus(id, text, level) {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.className = `value ${level}`;
+    }
+
+    function setFlowBadge(flow, state) {
+      const badge = document.getElementById("flowBadge");
+      badge.textContent = `${flow} | ${state}`;
+      badge.className = "pill";
+      if (state.includes("FAULT")) {
+        badge.classList.add("danger");
+      } else if (flow === "CHARGING") {
+        badge.classList.add("ok");
+      } else if (flow === "DISCHARGING") {
+        badge.classList.add("warn");
+      } else {
+        badge.classList.add("ok");
+      }
+    }
+
+    function updateModeButtons(mode) {
+      ["auto", "charge", "discharge"].forEach((m) => {
+        document.getElementById(`mode-${m}`).classList.toggle("active", m === mode);
+      });
+    }
+
+    function updateData(packet) {
+      const soc = packet.soc_ai_pct;
+      const ring = document.getElementById("socRing");
+      const degrees = Math.max(0, Math.min(360, (soc / 100) * 360));
+      ring.style.background = `conic-gradient(var(--accent) 0deg, var(--accent) ${degrees}deg, #213449 ${degrees}deg 360deg)`;
+
+      document.getElementById("socMain").textContent = soc.toFixed(1);
+      document.getElementById("socTrue").textContent = `${packet.soc_true_pct.toFixed(1)} %`;
+      document.getElementById("socErr").textContent = `${packet.soc_error_pct.toFixed(2)} %`;
+      document.getElementById("soh").textContent = `${packet.soh_pct.toFixed(2)} %`;
+      document.getElementById("simTime").textContent = `${packet.time_s.toFixed(0)} s`;
+
+      document.getElementById("packV").textContent = `${packet.pack_voltage_v.toFixed(2)} V`;
+      document.getElementById("packI").textContent = `${packet.command_current_a.toFixed(1)} A`;
+      document.getElementById("packP").textContent = `${packet.pack_power_kw.toFixed(2)} kW`;
+      document.getElementById("tempMax").textContent = `${packet.max_temp_c.toFixed(1)} C`;
+      document.getElementById("cellRange").textContent = `${packet.min_cell_v.toFixed(3)} V - ${packet.max_cell_v.toFixed(3)} V`;
+
+      document.getElementById("wAllowed").textContent = asWindow(packet.windows.allowed);
+      document.getElementById("wVoltage").textContent = asWindow(packet.windows.voltage);
+      document.getElementById("wTemp").textContent = asWindow(packet.windows.temp);
+      document.getElementById("wSoc").textContent = asWindow(packet.windows.soc);
+      document.getElementById("reqCmd").textContent = `${packet.request_current_a.toFixed(1)} A -> ${packet.command_current_a.toFixed(1)} A`;
+      document.getElementById("events").textContent = packet.events.length ? packet.events.join(" | ") : "None";
+
+      setStatus("limitCurrent", packet.limits_active.current ? "LIMITING" : "NORMAL", packet.limits_active.current ? "warn" : "ok");
+      setStatus("limitVoltage", packet.limits_active.voltage ? "ACTIVE" : "SAFE", packet.limits_active.voltage ? "danger" : "ok");
+      setStatus("limitTemp", packet.limits_active.temperature ? "ACTIVE" : "SAFE", packet.limits_active.temperature ? "danger" : "ok");
+      setStatus("limitSoc", packet.limits_active.soc ? "ACTIVE" : "SAFE", packet.limits_active.soc ? "warn" : "ok");
+
+      setFlowBadge(packet.flow_state, packet.state);
+      latestMode = packet.drive_mode;
+      updateModeButtons(latestMode);
+
+      history.labels.push(packet.time_s.toFixed(0));
+      history.req.push(packet.request_current_a);
+      history.cmd.push(packet.command_current_a);
+      history.socAi.push(packet.soc_ai_pct);
+      history.socTrue.push(packet.soc_true_pct);
+      history.temp.push(packet.max_temp_c);
+
+      if (history.labels.length > MAX_POINTS) {
+        Object.keys(history).forEach((k) => history[k].shift());
+      }
+      currentChart.update("none");
+      socChart.update("none");
+    }
+
+    socket.on("telemetry", updateData);
+
+    document.getElementById("mode-auto").onclick = () => socket.emit("set_drive_mode", { mode: "auto" });
+    document.getElementById("mode-charge").onclick = () => socket.emit("set_drive_mode", { mode: "charge" });
+    document.getElementById("mode-discharge").onclick = () => socket.emit("set_drive_mode", { mode: "discharge" });
+
+    document.getElementById("scenario-temp").onclick = () => socket.emit("trigger_scenario", { scenario: "temp_spike" });
+    document.getElementById("scenario-low-v").onclick = () => socket.emit("trigger_scenario", { scenario: "low_voltage" });
+    document.getElementById("scenario-high-v").onclick = () => socket.emit("trigger_scenario", { scenario: "high_voltage" });
+
+    const lpmButton = document.getElementById("toggle-lpm");
+    lpmButton.onclick = () => {
+      lpm = !lpm;
+      lpmButton.textContent = `Low Power: ${lpm ? "ON" : "OFF"}`;
+      lpmButton.classList.toggle("active", lpm);
+      socket.emit("set_low_power", { enabled: lpm });
+    };
+  </script>
+</body>
+</html>

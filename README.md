@@ -1,34 +1,54 @@
-This repository contains a deep-learning-based Battery Management System (BMS) prototype. It moves beyond traditional threshold-based logic by using a Recurrent Neural Network (RNN) to provide high-precision State of Charge (SOC) and health analytics.
+﻿# EV Battery Manager
 
-🧠 Model Performance & Milestone
-After 100 training epochs, the model reached a critical accuracy milestone, making it suitable for professional-grade battery diagnostics.
+This repository includes a physics-based EV battery simulator and an AI-driven Battery Management System (BMS) controller for SOC-aware safety limiting.
 
-Architecture: Recurrent Neural Network (RNN) optimized for time-series data.
+## Simulated BMS (CLI)
 
-Training Duration: 100 Epochs.
+Run the standalone simulator:
 
-Final Validation MAE: 0.9455.
+```bash
+python simulated_bms.py --duration 1200 --dt 1 --log-interval 30 --series-cells 12 --parallel-groups 40 --ai-model bms_lstm_model.keras --ai-x-scaler x_scaler.pkl --ai-y-scaler y_scaler.pkl --csv bms_simulation_log.csv
+```
 
-Accuracy: Approximately 99% when predicting State of Charge (SOC).
+What it does:
+- Simulates battery cell voltage, SOC, temperature, SOH, and pack behavior.
+- Uses an AI model to estimate SOC and feed BMS control logic.
+- Applies safety limits for voltage, temperature, SOC, and current.
+- Logs live telemetry and writes CSV output.
 
-🛠️ Project Components
-Deep Learning Model: A "trained brain" that recognizes temporal patterns like voltage sag and temperature discharge curves.
+## Live Flask Dashboard
 
-Hardware Integration: Prototype designed for a single-cell monitor using an Arduino Uno to collect voltage and temperature data.
+Run backend + web frontend:
 
-Web Dashboard: An interactive HTML/CSS interface displaying real-time metrics such as:
+```bash
+python app.py
+```
 
-Voltage: 3.72 V
+Open:
 
-Current: 1.4 A
+`http://127.0.0.1:5000`
 
-Temperature: 31 °C
+Dashboard capabilities:
+- Live EV battery telemetry (voltage, current, power, SOC, SOH, temperature).
+- AI SOC vs true SOC visualization.
+- Charging/discharging state.
+- Safety-limiting reason display (`VOLTAGE`, `TEMPERATURE`, `SOC`).
+- Scenario triggers for demonstration of BMS protections.
 
-Estimated Range: 324 km
+## Streamlit App
 
-📂 File Structure
-bms_rnn_model.py: The core script used for training the RNN.
+Run locally:
 
-trained_brain.h5: The saved weights of the 100-epoch model.
+```bash
+streamlit run streamlit_app.py
+```
 
-dashboard/: The frontend interface for visualizing battery health.
+## Deploy to Streamlit Community Cloud
+
+1. Push this repo to GitHub.
+2. Open [https://share.streamlit.io](https://share.streamlit.io).
+3. Create a new app with:
+   - Repository: `Nilay-11/BMS-file-manager`
+   - Branch: `main`
+   - Main file path: `streamlit_app.py`
+4. Deploy.
