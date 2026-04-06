@@ -1,0 +1,9 @@
+﻿Flask
+Flask-SocketIO
+numpy
+pandas
+scikit-learn
+joblib
+tensorflow
+streamlit
+python-socketio
