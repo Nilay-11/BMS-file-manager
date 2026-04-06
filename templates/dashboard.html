@@ -3,461 +3,528 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>EV BMS AI Safety Dashboard</title>
+  <title>Battery Health Monitor</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     :root {
-      --bg: #0d1117;
-      --panel: #151b23;
-      --panel-2: #1b2532;
-      --text: #e8eef8;
-      --muted: #9fb0c4;
-      --ok: #2bd67b;
-      --warn: #ffb347;
-      --danger: #ff5d5d;
-      --accent: #43a6ff;
-      --line: #2b3748;
+      --bg: #060709;
+      --panel: #0c0d11;
+      --line: #2b2f36;
+      --text: #f0f4f8;
+      --muted: #8a93a1;
+      --green: #00e160;
+      --blue: #3f65ff;
+      --red: #ff3d3d;
+      --amber: #ffb347;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+      padding: 18px 16px 20px;
       color: var(--text);
-      background:
-        radial-gradient(900px 500px at 0% 0%, #17263a 0%, transparent 60%),
-        radial-gradient(800px 450px at 100% 100%, #1d2b3b 0%, transparent 60%),
-        var(--bg);
-      min-height: 100vh;
-      padding: 16px;
+      background: radial-gradient(1000px 500px at 50% 0%, #091018 0%, transparent 65%), var(--bg);
+      font-family: "Segoe UI", Roboto, sans-serif;
+      overflow-x: hidden;
     }
-    .header {
+
+    .top {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 12px;
-      margin-bottom: 14px;
+      border-top: 2px solid #0aa4ff;
+      padding-top: 14px;
+      margin-bottom: 16px;
     }
     .title {
       margin: 0;
-      font-size: 1.25rem;
-      letter-spacing: 0.03em;
+      font-size: 36px;
+      letter-spacing: 1px;
+      font-weight: 800;
     }
-    .sub {
+    .subtitle {
+      margin-top: 5px;
       color: var(--muted);
-      margin-top: 2px;
-      font-size: 0.88rem;
+      font-size: 12px;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
     }
-    .pill {
-      border: 1px solid var(--line);
+    .system-pill {
+      border: 1px solid #1f3d2a;
+      color: var(--green);
       border-radius: 999px;
-      padding: 8px 12px;
-      background: #0f1622;
-      font-size: 0.85rem;
+      padding: 9px 16px;
+      font-size: 13px;
+      background: #0b130f;
       white-space: nowrap;
     }
-    .pill.ok { color: var(--ok); border-color: rgba(43, 214, 123, 0.35); }
-    .pill.warn { color: var(--warn); border-color: rgba(255, 179, 71, 0.4); }
-    .pill.danger { color: var(--danger); border-color: rgba(255, 93, 93, 0.45); }
 
-    .grid {
+    .divider {
+      height: 1px;
+      background: var(--line);
+      margin-bottom: 18px;
+    }
+
+    .layout {
       display: grid;
-      grid-template-columns: 360px 1fr 360px;
-      gap: 14px;
+      grid-template-columns: 330px 1fr 330px;
+      gap: 16px;
+      min-height: calc(100vh - 140px);
     }
-    @media (max-width: 1200px) {
-      .grid { grid-template-columns: 1fr; }
+    @media (max-width: 1350px) {
+      .layout { grid-template-columns: 1fr; }
     }
 
-    .card {
-      background: linear-gradient(160deg, var(--panel), var(--panel-2));
+    .panel {
       border: 1px solid var(--line);
       border-radius: 14px;
-      padding: 14px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+      background: linear-gradient(160deg, #0a0b0f, #0c1017);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+      padding: 18px;
     }
-    .card h3 {
-      margin: 0 0 10px;
-      font-size: 0.82rem;
-      font-weight: 700;
+    .panel-title {
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.07em;
+      letter-spacing: 0.12em;
+      font-size: 13px;
+      margin-bottom: 14px;
+      font-weight: 700;
     }
-    .soc-wrap {
-      display: grid;
-      place-items: center;
-      margin: 6px 0 16px;
+
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 16px 0;
+      border-bottom: 1px solid #1f232a;
     }
-    .ring {
-      width: 230px;
-      height: 230px;
-      border-radius: 50%;
-      background:
-        conic-gradient(var(--accent) 0deg, var(--accent) 0deg, #213449 0deg 360deg);
-      display: grid;
-      place-items: center;
-      transition: background 0.35s ease;
+    .metric-row:last-of-type { border-bottom: none; }
+    .metric-k {
+      color: #b6c0cf;
+      font-size: 30px;
+      letter-spacing: 0.03em;
     }
-    .ring-inner {
-      width: 188px;
-      height: 188px;
-      border-radius: 50%;
-      background: #101723;
-      display: grid;
-      place-items: center;
-      text-align: center;
-      border: 1px solid #2a384b;
-    }
-    .soc-main {
-      font-size: 3rem;
+    .metric-v {
+      font-size: 58px;
       font-weight: 700;
       line-height: 1;
     }
-    .soc-label { color: var(--muted); font-size: 0.82rem; letter-spacing: 0.06em; }
-    .kv {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 8px;
-      padding: 8px 0;
-      border-bottom: 1px solid rgba(159, 176, 196, 0.12);
-      font-size: 0.9rem;
-    }
-    .kv:last-child { border-bottom: none; }
-    .kv .k { color: var(--muted); }
-    .big {
-      font-size: 1.6rem;
-      font-weight: 600;
-    }
-    .status-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
-      margin-top: 4px;
-    }
-    .status {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 10px;
-      background: rgba(16, 23, 35, 0.66);
-    }
-    .status .label {
+    .metric-unit {
       color: var(--muted);
-      text-transform: uppercase;
-      font-size: 0.72rem;
-      letter-spacing: 0.06em;
-      margin-bottom: 6px;
+      font-size: 26px;
+      margin-left: 6px;
     }
-    .status .value {
-      font-size: 0.95rem;
-      font-weight: 600;
-    }
-    .value.ok { color: var(--ok); }
-    .value.warn { color: var(--warn); }
-    .value.danger { color: var(--danger); }
 
-    .controls {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
-      margin-top: 8px;
+    .log-box {
+      margin-top: 18px;
+      background: #12151c;
+      border-radius: 10px;
+      border: 1px solid #1e232d;
+      padding: 12px;
     }
-    .controls button {
-      background: #101926;
+    .log-title {
+      color: #9ea9ba;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+    #logFeed {
+      height: 86px;
+      overflow: hidden;
+      font-family: Consolas, monospace;
+      color: #9aa4b4;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .center {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 700px;
+    }
+    .center-glow {
+      position: absolute;
+      width: 530px;
+      height: 530px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0,225,96,0.15) 0%, rgba(0,225,96,0.03) 35%, transparent 70%);
+      filter: blur(10px);
+      pointer-events: none;
+    }
+
+    .soc-ring {
+      position: relative;
+      width: 300px;
+      height: 300px;
+      border-radius: 50%;
+      border: 8px solid #2c3138;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0a0d12;
+      z-index: 2;
+      transition: box-shadow .3s ease, border-color .3s ease;
+    }
+    .soc-ring.active {
+      box-shadow: 0 0 40px rgba(0,225,96,0.22);
+      border-color: #2f8f57;
+    }
+    .soc-main {
+      font-size: 86px;
+      font-weight: 800;
+      line-height: 1;
+      text-align: center;
+    }
+    .soc-sub {
+      text-align: center;
+      color: #9da8b8;
+      font-size: 26px;
+      margin-top: 6px;
+      letter-spacing: 0.08em;
+    }
+
+    .range {
+      margin-top: 28px;
+      text-align: center;
+      z-index: 2;
+    }
+    .range-v {
+      font-size: 58px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .range-unit { color: #8e99aa; font-size: 32px; margin-left: 8px; }
+    .range-l { color: #8e99aa; font-size: 22px; letter-spacing: 0.07em; margin-top: 6px; text-transform: uppercase; }
+
+    .center-stats {
+      margin-top: 18px;
+      width: 100%;
+      max-width: 760px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      z-index: 2;
+    }
+    .mini {
+      border: 1px solid #222a34;
+      background: #0f1218;
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .mini-k { color: #8d98aa; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px; }
+    .mini-v { font-size: 20px; font-weight: 600; }
+    .ok { color: var(--green); }
+    .warn { color: var(--amber); }
+    .danger { color: var(--red); }
+
+    .controls-col {
+      display: flex;
+      flex-direction: column;
+    }
+    .btn {
+      width: 100%;
+      text-align: left;
+      border-radius: 10px;
+      padding: 16px 14px;
+      border: 1px solid #343945;
       color: var(--text);
-      border: 1px solid #2f4156;
+      background: #1a1d25;
+      font-size: 29px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .btn:hover { background: #212735; }
+    .btn.blue { border-color: var(--blue); color: #87a4ff; background: #131d3d; }
+    .btn.red { border-color: var(--red); color: var(--red); background: #220f13; margin-top: auto; }
+    .btn.active { border-color: var(--green); color: #d5ffe8; background: #10241a; }
+
+    #diagPanel {
+      margin-top: 10px;
+      border: 1px solid #273043;
+      border-radius: 10px;
+      background: #101827;
       padding: 10px;
-      border-radius: 10px;
-      cursor: pointer;
-      font-size: 0.84rem;
+      display: none;
     }
-    .controls button.active {
-      border-color: var(--accent);
-      background: #152338;
-      color: #d9ecff;
-    }
-    .scenario-controls {
+    #diagPanel canvas { height: 200px !important; width: 100% !important; }
+
+    .safety-grid {
+      margin-top: 14px;
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: 1fr 1fr;
       gap: 8px;
-      margin-top: 8px;
     }
-    .scenario-controls button {
-      background: #251419;
-      color: #ffd8d8;
-      border: 1px solid #62424b;
-      padding: 9px;
-      border-radius: 10px;
-      cursor: pointer;
-      font-size: 0.78rem;
+    .safety {
+      border: 1px solid #222a34;
+      border-radius: 8px;
+      background: #101318;
+      padding: 8px;
     }
-    .charts {
-      display: grid;
-      grid-template-rows: 1fr 1fr;
-      gap: 14px;
-      min-height: 560px;
+    .safety-k {
+      color: #8d98aa;
+      font-size: 11px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      letter-spacing: .08em;
     }
-    .chart-wrap { min-height: 260px; }
-    .foot {
-      margin-top: 12px;
-      font-size: 0.82rem;
-      color: var(--muted);
-      line-height: 1.4;
+    .safety-v {
+      font-size: 18px;
+      font-weight: 700;
     }
   </style>
 </head>
 <body>
-  <div class="header">
+  <header class="top">
     <div>
-      <h1 class="title">EV Battery Simulator + AI BMS Safety Controller</h1>
-      <div class="sub">Physics-based battery simulation with live AI SOC control and safety limit diagnostics</div>
+      <h1 class="title">BATTERY HEALTH MONITOR</h1>
+      <div class="subtitle">TEAM 25 | HARDWARE PROTOTYPE</div>
     </div>
-    <div id="flowBadge" class="pill ok">IDLE</div>
-  </div>
+    <div id="systemPill" class="system-pill">• SYSTEM ONLINE</div>
+  </header>
 
-  <div class="grid">
-    <section class="card">
-      <h3>State of Charge</h3>
-      <div class="soc-wrap">
-        <div id="socRing" class="ring">
-          <div class="ring-inner">
-            <div id="socMain" class="soc-main">--</div>
-            <div class="soc-label">AI SOC (%)</div>
-          </div>
-        </div>
+  <div class="divider"></div>
+
+  <main class="layout">
+    <section class="panel">
+      <div class="panel-title">Live Sensors</div>
+
+      <div class="metric-row">
+        <div class="metric-k">VOLTAGE</div>
+        <div><span id="voltageV" class="metric-v">0.00</span><span class="metric-unit">V</span></div>
+      </div>
+      <div class="metric-row">
+        <div class="metric-k">CURRENT</div>
+        <div><span id="currentA" class="metric-v">0.00</span><span class="metric-unit">A</span></div>
+      </div>
+      <div class="metric-row">
+        <div class="metric-k">TEMP</div>
+        <div><span id="tempC" class="metric-v">0.0</span><span class="metric-unit">°C</span></div>
       </div>
 
-      <div class="kv"><div class="k">True SOC (simulated)</div><div id="socTrue">--</div></div>
-      <div class="kv"><div class="k">SOC Error (AI-True)</div><div id="socErr">--</div></div>
-      <div class="kv"><div class="k">State of Health</div><div id="soh">--</div></div>
-      <div class="kv"><div class="k">Time</div><div id="simTime">--</div></div>
-
-      <h3 style="margin-top:14px;">Pack Telemetry</h3>
-      <div class="kv"><div class="k">Pack Voltage</div><div id="packV" class="big">--</div></div>
-      <div class="kv"><div class="k">Pack Current</div><div id="packI" class="big">--</div></div>
-      <div class="kv"><div class="k">Pack Power</div><div id="packP">--</div></div>
-      <div class="kv"><div class="k">Max Temperature</div><div id="tempMax">--</div></div>
-      <div class="kv"><div class="k">Cell Voltage Range</div><div id="cellRange">--</div></div>
-    </section>
-
-    <section class="charts">
-      <div class="card chart-wrap">
-        <h3>Current Demand vs BMS Command</h3>
-        <canvas id="currentChart"></canvas>
-      </div>
-      <div class="card chart-wrap">
-        <h3>SOC and Temperature</h3>
-        <canvas id="socChart"></canvas>
+      <div class="log-box">
+        <div class="log-title">Diagnostics Log</div>
+        <div id="logFeed">> Initializing sensors...<br>> Waiting for backend stream...</div>
       </div>
     </section>
 
-    <section class="card">
-      <h3>Safety Limit Status</h3>
-      <div class="status-grid">
-        <div class="status">
-          <div class="label">Current Limiting</div>
-          <div id="limitCurrent" class="value ok">NORMAL</div>
-        </div>
-        <div class="status">
-          <div class="label">Voltage Guard</div>
-          <div id="limitVoltage" class="value ok">SAFE</div>
-        </div>
-        <div class="status">
-          <div class="label">Temperature Guard</div>
-          <div id="limitTemp" class="value ok">SAFE</div>
-        </div>
-        <div class="status">
-          <div class="label">SOC Guard</div>
-          <div id="limitSoc" class="value ok">SAFE</div>
+    <section class="panel center">
+      <div class="center-glow"></div>
+
+      <div id="socRing" class="soc-ring">
+        <div>
+          <div id="socMain" class="soc-main">--</div>
+          <div class="soc-sub">% CHARGE</div>
         </div>
       </div>
 
-      <h3 style="margin-top:14px;">BMS Windows (A)</h3>
-      <div class="kv"><div class="k">Allowed</div><div id="wAllowed">--</div></div>
-      <div class="kv"><div class="k">Voltage Window</div><div id="wVoltage">--</div></div>
-      <div class="kv"><div class="k">Temp Window</div><div id="wTemp">--</div></div>
-      <div class="kv"><div class="k">SOC Window (AI)</div><div id="wSoc">--</div></div>
-      <div class="kv"><div class="k">Requested -> Commanded</div><div id="reqCmd">--</div></div>
-      <div class="kv"><div class="k">BMS Events</div><div id="events">--</div></div>
-
-      <h3 style="margin-top:14px;">Drive Mode</h3>
-      <div class="controls">
-        <button id="mode-auto">Auto</button>
-        <button id="mode-charge">Charge</button>
-        <button id="mode-discharge">Discharge</button>
+      <div class="range">
+        <span id="rangeKm" class="range-v">--</span><span class="range-unit">km</span>
+        <div class="range-l">Estimated Range</div>
       </div>
 
-      <h3 style="margin-top:14px;">Safety Scenarios</h3>
-      <div class="scenario-controls">
-        <button id="scenario-temp">Temp Spike</button>
-        <button id="scenario-low-v">Low Voltage</button>
-        <button id="scenario-high-v">High Voltage</button>
-      </div>
-
-      <h3 style="margin-top:14px;">Power Mode</h3>
-      <div class="controls" style="grid-template-columns:1fr;">
-        <button id="toggle-lpm">Low Power: OFF</button>
-      </div>
-
-      <div class="foot">
-        This dashboard displays how AI-estimated SOC and safety windows constrain battery current
-        to protect voltage and temperature limits in real time.
+      <div class="center-stats">
+        <div class="mini">
+          <div class="mini-k">Flow</div>
+          <div id="flowState" class="mini-v">IDLE</div>
+        </div>
+        <div class="mini">
+          <div class="mini-k">AI SOC / True SOC</div>
+          <div id="socPair" class="mini-v">-- / --</div>
+        </div>
+        <div class="mini">
+          <div class="mini-k">Pack Power</div>
+          <div id="packPower" class="mini-v">-- kW</div>
+        </div>
+        <div class="mini">
+          <div class="mini-k">State of Health</div>
+          <div id="sohVal" class="mini-v">-- %</div>
+        </div>
       </div>
     </section>
-  </div>
+
+    <section class="panel controls-col">
+      <div class="panel-title">Control Panel</div>
+
+      <button id="btnLpm" class="btn">
+        <span>Low Power Mode</span>
+        <span id="lpmState">OFF</span>
+      </button>
+
+      <button id="btnDiag" class="btn blue">
+        <span>Run Smart Diagnostics</span>
+        <span id="diagArrow">▼</span>
+      </button>
+
+      <div id="diagPanel">
+        <canvas id="diagChart"></canvas>
+      </div>
+
+      <button id="btnOptimize" class="btn">
+        <span>Optimize Charging</span>
+        <span>⚡</span>
+      </button>
+
+      <div class="safety-grid">
+        <div class="safety">
+          <div class="safety-k">Current Limit</div>
+          <div id="limitCurrent" class="safety-v ok">SAFE</div>
+        </div>
+        <div class="safety">
+          <div class="safety-k">Voltage Limit</div>
+          <div id="limitVoltage" class="safety-v ok">SAFE</div>
+        </div>
+        <div class="safety">
+          <div class="safety-k">Temp Limit</div>
+          <div id="limitTemp" class="safety-v ok">SAFE</div>
+        </div>
+        <div class="safety">
+          <div class="safety-k">SOC Limit</div>
+          <div id="limitSoc" class="safety-v ok">SAFE</div>
+        </div>
+      </div>
+
+      <button id="btnFault" class="btn red">
+        <span>! SIMULATE FAULT</span>
+      </button>
+    </section>
+  </main>
 
   <script>
     const socket = io();
-    const MAX_POINTS = 90;
-    let latestMode = "auto";
     let lpm = false;
+    let diagOpen = false;
+    const hist = { labels: [], req: [], cmd: [], temp: [], socAi: [] };
+    const MAX_POINTS = 70;
 
-    const history = {
-      labels: [],
-      req: [],
-      cmd: [],
-      socAi: [],
-      socTrue: [],
-      temp: []
+    const diagChart = new Chart(document.getElementById("diagChart").getContext("2d"), {
+      type: "line",
+      data: {
+        labels: hist.labels,
+        datasets: [
+          { label: "Requested A", data: hist.req, borderColor: "#ffb347", borderWidth: 2, tension: .25 },
+          { label: "Commanded A", data: hist.cmd, borderColor: "#4f7bff", borderWidth: 2, tension: .25 },
+          { label: "Max Temp C", data: hist.temp, borderColor: "#ff5d5d", borderWidth: 2, tension: .25, yAxisID: "y1" },
+          { label: "AI SOC %", data: hist.socAi, borderColor: "#00e160", borderWidth: 2, tension: .25, yAxisID: "y2" }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c7d2e1", boxWidth: 14 } } },
+        scales: {
+          x: { ticks: { color: "#94a3b8" }, grid: { color: "rgba(148,163,184,.15)" } },
+          y: { ticks: { color: "#94a3b8" }, grid: { color: "rgba(148,163,184,.15)" } },
+          y1: { position: "right", min: 0, max: 80, grid: { drawOnChartArea: false }, ticks: { color: "#ff9b9b" } },
+          y2: { position: "right", min: 0, max: 100, grid: { drawOnChartArea: false }, ticks: { display: false } }
+        }
+      }
+    });
+
+    function addLog(msg) {
+      const node = document.getElementById("logFeed");
+      const t = new Date().toLocaleTimeString([], { hour12: false });
+      node.innerHTML = `> [${t}] ${msg}<br>` + node.innerHTML;
+    }
+
+    function setStatus(id, active, danger = false) {
+      const el = document.getElementById(id);
+      if (active) {
+        el.textContent = "ACTIVE";
+        el.className = `safety-v ${danger ? "danger" : "warn"}`;
+      } else {
+        el.textContent = "SAFE";
+        el.className = "safety-v ok";
+      }
+    }
+
+    function updateUI(p) {
+      const cellV = (p.pack_voltage_v / 96.0);
+      document.getElementById("voltageV").textContent = cellV.toFixed(2);
+      document.getElementById("currentA").textContent = Math.abs(p.command_current_a).toFixed(2);
+      document.getElementById("tempC").textContent = p.max_temp_c.toFixed(1);
+
+      document.getElementById("socMain").textContent = Math.round(p.soc_ai_pct);
+      document.getElementById("rangeKm").textContent = Math.max(0, Math.round(p.soc_ai_pct * 3.8));
+      document.getElementById("flowState").textContent = p.flow_state;
+      document.getElementById("socPair").textContent = `${p.soc_ai_pct.toFixed(1)} / ${p.soc_true_pct.toFixed(1)}`;
+      document.getElementById("packPower").textContent = `${p.pack_power_kw.toFixed(2)} kW`;
+      document.getElementById("sohVal").textContent = `${p.soh_pct.toFixed(2)} %`;
+
+      const ring = document.getElementById("socRing");
+      ring.classList.toggle("active", p.flow_state !== "IDLE");
+
+      setStatus("limitCurrent", p.limits_active.current, false);
+      setStatus("limitVoltage", p.limits_active.voltage, true);
+      setStatus("limitTemp", p.limits_active.temperature, true);
+      setStatus("limitSoc", p.limits_active.soc, false);
+
+      const pill = document.getElementById("systemPill");
+      if (p.state.includes("FAULT")) {
+        pill.textContent = "• SYSTEM FAULT";
+        pill.style.color = "#ff6262";
+        pill.style.borderColor = "#5b2727";
+      } else {
+        pill.textContent = "• SYSTEM ONLINE";
+        pill.style.color = "#00e160";
+        pill.style.borderColor = "#1f3d2a";
+      }
+
+      hist.labels.push(p.time_s.toFixed(0));
+      hist.req.push(p.request_current_a);
+      hist.cmd.push(p.command_current_a);
+      hist.temp.push(p.max_temp_c);
+      hist.socAi.push(p.soc_ai_pct);
+      if (hist.labels.length > MAX_POINTS) {
+        Object.keys(hist).forEach((k) => hist[k].shift());
+      }
+      if (diagOpen) {
+        diagChart.update("none");
+      }
+    }
+
+    socket.on("telemetry", (p) => {
+      updateUI(p);
+      if (p.events && p.events.length) {
+        addLog(p.events.join(" | "));
+      }
+    });
+
+    document.getElementById("btnLpm").onclick = () => {
+      lpm = !lpm;
+      document.getElementById("lpmState").textContent = lpm ? "ON" : "OFF";
+      document.getElementById("btnLpm").classList.toggle("active", lpm);
+      socket.emit("set_low_power", { enabled: lpm });
+      addLog(`Low Power Mode ${lpm ? "enabled" : "disabled"}`);
     };
 
-    const currentChart = new Chart(document.getElementById("currentChart").getContext("2d"), {
-      type: "line",
-      data: {
-        labels: history.labels,
-        datasets: [
-          { label: "Requested A", data: history.req, borderColor: "#f2a347", borderWidth: 2, tension: 0.25 },
-          { label: "Commanded A", data: history.cmd, borderColor: "#3fa8ff", borderWidth: 2, tension: 0.25 }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: "#c8d5e5" } } },
-        scales: {
-          x: { ticks: { color: "#a5b7cc" }, grid: { color: "rgba(165,183,204,0.12)" } },
-          y: { ticks: { color: "#a5b7cc" }, grid: { color: "rgba(165,183,204,0.12)" } }
-        }
+    document.getElementById("btnDiag").onclick = () => {
+      diagOpen = !diagOpen;
+      document.getElementById("diagPanel").style.display = diagOpen ? "block" : "none";
+      document.getElementById("diagArrow").textContent = diagOpen ? "▲" : "▼";
+      if (diagOpen) {
+        diagChart.update();
       }
-    });
+      addLog(diagOpen ? "Diagnostics opened" : "Diagnostics closed");
+    };
 
-    const socChart = new Chart(document.getElementById("socChart").getContext("2d"), {
-      type: "line",
-      data: {
-        labels: history.labels,
-        datasets: [
-          { label: "AI SOC %", data: history.socAi, borderColor: "#43d998", borderWidth: 2, tension: 0.3 },
-          { label: "True SOC %", data: history.socTrue, borderColor: "#4ea1ff", borderWidth: 2, tension: 0.3 },
-          { label: "Max Temp C", data: history.temp, borderColor: "#ff7d7d", borderWidth: 2, tension: 0.3, yAxisID: "y1" }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: "#c8d5e5" } } },
-        scales: {
-          x: { ticks: { color: "#a5b7cc" }, grid: { color: "rgba(165,183,204,0.12)" } },
-          y: { position: "left", ticks: { color: "#a5b7cc" }, grid: { color: "rgba(165,183,204,0.12)" }, min: 0, max: 100 },
-          y1: { position: "right", ticks: { color: "#f0b6b6" }, grid: { drawOnChartArea: false }, min: 0, max: 80 }
-        }
-      }
-    });
+    document.getElementById("btnOptimize").onclick = () => {
+      socket.emit("set_drive_mode", { mode: "charge" });
+      addLog("Optimize charging requested");
+      setTimeout(() => socket.emit("set_drive_mode", { mode: "auto" }), 6000);
+    };
 
-    function asWindow(win) {
-      return `${win[0].toFixed(1)} to ${win[1].toFixed(1)}`;
-    }
-
-    function setStatus(id, text, level) {
-      const el = document.getElementById(id);
-      el.textContent = text;
-      el.className = `value ${level}`;
-    }
-
-    function setFlowBadge(flow, state) {
-      const badge = document.getElementById("flowBadge");
-      badge.textContent = `${flow} | ${state}`;
-      badge.className = "pill";
-      if (state.includes("FAULT")) {
-        badge.classList.add("danger");
-      } else if (flow === "CHARGING") {
-        badge.classList.add("ok");
-      } else if (flow === "DISCHARGING") {
-        badge.classList.add("warn");
-      } else {
-        badge.classList.add("ok");
-      }
-    }
-
-    function updateModeButtons(mode) {
-      ["auto", "charge", "discharge"].forEach((m) => {
-        document.getElementById(`mode-${m}`).classList.toggle("active", m === mode);
-      });
-    }
-
-    function updateData(packet) {
-      const soc = packet.soc_ai_pct;
-      const ring = document.getElementById("socRing");
-      const degrees = Math.max(0, Math.min(360, (soc / 100) * 360));
-      ring.style.background = `conic-gradient(var(--accent) 0deg, var(--accent) ${degrees}deg, #213449 ${degrees}deg 360deg)`;
-
-      document.getElementById("socMain").textContent = soc.toFixed(1);
-      document.getElementById("socTrue").textContent = `${packet.soc_true_pct.toFixed(1)} %`;
-      document.getElementById("socErr").textContent = `${packet.soc_error_pct.toFixed(2)} %`;
-      document.getElementById("soh").textContent = `${packet.soh_pct.toFixed(2)} %`;
-      document.getElementById("simTime").textContent = `${packet.time_s.toFixed(0)} s`;
-
-      document.getElementById("packV").textContent = `${packet.pack_voltage_v.toFixed(2)} V`;
-      document.getElementById("packI").textContent = `${packet.command_current_a.toFixed(1)} A`;
-      document.getElementById("packP").textContent = `${packet.pack_power_kw.toFixed(2)} kW`;
-      document.getElementById("tempMax").textContent = `${packet.max_temp_c.toFixed(1)} C`;
-      document.getElementById("cellRange").textContent = `${packet.min_cell_v.toFixed(3)} V - ${packet.max_cell_v.toFixed(3)} V`;
-
-      document.getElementById("wAllowed").textContent = asWindow(packet.windows.allowed);
-      document.getElementById("wVoltage").textContent = asWindow(packet.windows.voltage);
-      document.getElementById("wTemp").textContent = asWindow(packet.windows.temp);
-      document.getElementById("wSoc").textContent = asWindow(packet.windows.soc);
-      document.getElementById("reqCmd").textContent = `${packet.request_current_a.toFixed(1)} A -> ${packet.command_current_a.toFixed(1)} A`;
-      document.getElementById("events").textContent = packet.events.length ? packet.events.join(" | ") : "None";
-
-      setStatus("limitCurrent", packet.limits_active.current ? "LIMITING" : "NORMAL", packet.limits_active.current ? "warn" : "ok");
-      setStatus("limitVoltage", packet.limits_active.voltage ? "ACTIVE" : "SAFE", packet.limits_active.voltage ? "danger" : "ok");
-      setStatus("limitTemp", packet.limits_active.temperature ? "ACTIVE" : "SAFE", packet.limits_active.temperature ? "danger" : "ok");
-      setStatus("limitSoc", packet.limits_active.soc ? "ACTIVE" : "SAFE", packet.limits_active.soc ? "warn" : "ok");
-
-      setFlowBadge(packet.flow_state, packet.state);
-      latestMode = packet.drive_mode;
-      updateModeButtons(latestMode);
-
-      history.labels.push(packet.time_s.toFixed(0));
-      history.req.push(packet.request_current_a);
-      history.cmd.push(packet.command_current_a);
-      history.socAi.push(packet.soc_ai_pct);
-      history.socTrue.push(packet.soc_true_pct);
-      history.temp.push(packet.max_temp_c);
-
-      if (history.labels.length > MAX_POINTS) {
-        Object.keys(history).forEach((k) => history[k].shift());
-      }
-      currentChart.update("none");
-      socChart.update("none");
-    }
-
-    socket.on("telemetry", updateData);
-
-    document.getElementById("mode-auto").onclick = () => socket.emit("set_drive_mode", { mode: "auto" });
-    document.getElementById("mode-charge").onclick = () => socket.emit("set_drive_mode", { mode: "charge" });
-    document.getElementById("mode-discharge").onclick = () => socket.emit("set_drive_mode", { mode: "discharge" });
-
-    document.getElementById("scenario-temp").onclick = () => socket.emit("trigger_scenario", { scenario: "temp_spike" });
-    document.getElementById("scenario-low-v").onclick = () => socket.emit("trigger_scenario", { scenario: "low_voltage" });
-    document.getElementById("scenario-high-v").onclick = () => socket.emit("trigger_scenario", { scenario: "high_voltage" });
-
-    const lpmButton = document.getElementById("toggle-lpm");
-    lpmButton.onclick = () => {
-      lpm = !lpm;
-      lpmButton.textContent = `Low Power: ${lpm ? "ON" : "OFF"}`;
-      lpmButton.classList.toggle("active", lpm);
-      socket.emit("set_low_power", { enabled: lpm });
+    document.getElementById("btnFault").onclick = () => {
+      socket.emit("trigger_scenario", { scenario: "temp_spike" });
+      addLog("Fault scenario injected: temperature spike");
     };
   </script>
 </body>
