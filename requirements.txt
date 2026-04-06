@@ -1,9 +1,6 @@
-﻿Flask
-Flask-SocketIO
-numpy
-pandas
-scikit-learn
-joblib
-tensorflow
-streamlit
-python-socketio
+﻿streamlit==1.44.1
+numpy==1.26.4
+pandas==2.2.2
+scikit-learn==1.5.2
+joblib==1.4.2
+tensorflow-cpu==2.16.1
