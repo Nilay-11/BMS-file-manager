@@ -4,7 +4,7 @@ import math
 import random
 import threading
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -57,6 +57,8 @@ class LiveBMSSimulator:
         self.bms = BMSController()
         self.ai = RealWorldSocModel.load(config.soc_model_path)
         self.lock = threading.Lock()
+        self.nominal_resistances: List[float] = [cell.internal_resistance_ohm for cell in self.pack.cells]
+        self.ai_soc_filtered: Optional[float] = None
         self.tick = 0
         self.prev_current_a = 0.0
         self.low_power_mode = False
@@ -86,27 +88,71 @@ class LiveBMSSimulator:
         with self.lock:
             self.drive_mode = mode
 
+    @staticmethod
+    def _voltage_soc_proxy(avg_cell_v: float) -> float:
+        # Robust proxy used to stabilize AI output under outlier/fault conditions.
+        return max(0.0, min(100.0, ((avg_cell_v - 3.45) / (4.15 - 3.45)) * 100.0))
+
+    def _stabilize_ai_soc(
+        self,
+        raw_soc_pct: Optional[float],
+        avg_cell_v: float,
+        dt_s: float,
+        fault_active: bool,
+    ) -> float:
+        proxy_soc = self._voltage_soc_proxy(avg_cell_v)
+        if raw_soc_pct is None:
+            raw = self.ai_soc_filtered if self.ai_soc_filtered is not None else proxy_soc
+        else:
+            raw = max(0.0, min(100.0, float(raw_soc_pct)))
+
+        if self.ai_soc_filtered is None:
+            self.ai_soc_filtered = raw
+            return self.ai_soc_filtered
+
+        max_delta = max(0.2, 1.2 * dt_s)
+        bounded = max(self.ai_soc_filtered - max_delta, min(self.ai_soc_filtered + max_delta, raw))
+        if fault_active:
+            bounded = 0.8 * bounded + 0.2 * proxy_soc
+        else:
+            bounded = 0.9 * bounded + 0.1 * proxy_soc
+        self.ai_soc_filtered = max(0.0, min(100.0, bounded))
+        return self.ai_soc_filtered
+
+    def _relax_fault_modifiers(self) -> None:
+        # Slowly recover modified cell resistance after scenario injections.
+        for idx, cell in enumerate(self.pack.cells):
+            nominal = self.nominal_resistances[idx]
+            cell.internal_resistance_ohm += (nominal - cell.internal_resistance_ohm) * 0.03
+
     def trigger_scenario(self, scenario: str) -> None:
         with self.lock:
             if scenario == "temp_spike":
                 for cell in self.pack.cells:
-                    cell.temperature_c += 30.0
+                    cell.temperature_c += 10.0
             elif scenario == "low_voltage":
                 for cell in self.pack.cells:
                     cell.temperature_c = min(cell.temperature_c, 31.0)
                 for idx, cell in enumerate(self.pack.cells):
                     if idx % 8 == 0:
-                        cell.soc = 0.01
-                        cell.internal_resistance_ohm *= 5.0
+                        cell.soc = max(0.08, cell.soc - 0.12)
+                        cell.internal_resistance_ohm *= 1.8
             elif scenario == "high_voltage":
                 for cell in self.pack.cells:
                     cell.temperature_c = min(cell.temperature_c, 31.0)
                 for idx, cell in enumerate(self.pack.cells):
                     if idx % 8 == 0:
-                        cell.soc = 0.999
+                        cell.soc = min(0.97, cell.soc + 0.10)
+            elif scenario == "clear_faults":
+                for idx, cell in enumerate(self.pack.cells):
+                    cell.temperature_c = min(cell.temperature_c, 34.0)
+                    cell.internal_resistance_ohm = self.nominal_resistances[idx]
+                self.bms.contactor_closed = True
+                self.bms.fault_reason = ""
 
     def step(self) -> Dict[str, object]:
         with self.lock:
+            self._relax_fault_modifiers()
             t_s = self.tick * self.config.dt_s
             profile = self.profile.next_row()
             ambient_c = profile["temperature_c"] + 0.3 * math.sin(t_s / 240.0)
@@ -131,12 +177,28 @@ class LiveBMSSimulator:
                 converter_command_pct=profile["converter_command_pct"],
                 anomaly_score_pct=profile["anomaly_score_pct"],
             )
+            ai_soc_raw_pct = ai_soc_pct
+            ai_soc_pct = self._stabilize_ai_soc(
+                raw_soc_pct=ai_soc_raw_pct,
+                avg_cell_v=avg_cell_v,
+                dt_s=self.config.dt_s,
+                fault_active=bool(self.bms.fault_reason),
+            )
 
             command = self.bms.command(
                 requested_current_a=requested_current_a,
                 pack=self.pack,
                 soc_estimate_pct=ai_soc_pct,
             )
+            # Keep user-selected charge/discharge intent when safety windows allow it.
+            if self.drive_mode == "charge" and command.current_a > 0.0 and command.allowed_window_a[0] < -0.5:
+                command.current_a = max(command.allowed_window_a[0], -abs(requested_current_a))
+                if "CURRENT_LIMITED" not in command.events:
+                    command.events.append("CURRENT_LIMITED")
+            if self.drive_mode == "discharge" and command.current_a < 0.0 and command.allowed_window_a[1] > 0.5:
+                command.current_a = min(command.allowed_window_a[1], abs(requested_current_a))
+                if "CURRENT_LIMITED" not in command.events:
+                    command.events.append("CURRENT_LIMITED")
             cell_voltages = self.pack.step(
                 pack_current_a=command.current_a,
                 ambient_c=ambient_c,
@@ -178,6 +240,7 @@ class LiveBMSSimulator:
                 "soc_true_pct": round(soc_true_pct, 2),
                 "soc_ai_pct": round(soc_ai_pct, 2),
                 "soc_error_pct": round(soc_ai_pct - soc_true_pct, 2),
+                "soc_ai_raw_pct": round(ai_soc_raw_pct, 2) if ai_soc_raw_pct is not None else None,
                 "soh_pct": round(avg_soh_pct, 2),
                 "balancing_cells": sum(1 for x in command.balance_mask if x),
                 "cooling_on": command.cooling_on,

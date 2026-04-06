@@ -1,530 +1,371 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Battery Health Monitor</title>
+  <title>EV AI-BMS Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     :root {
-      --bg: #060709;
-      --panel: #0c0d11;
-      --line: #2b2f36;
-      --text: #f0f4f8;
-      --muted: #8a93a1;
-      --green: #00e160;
-      --blue: #3f65ff;
-      --red: #ff3d3d;
-      --amber: #ffb347;
+      --bg: #0c1118;
+      --panel: #121a24;
+      --line: #2b3a4f;
+      --text: #e8eff9;
+      --muted: #9fb0c4;
+      --ok: #2bd67b;
+      --warn: #ffb347;
+      --danger: #ff6363;
+      --accent: #50a8ff;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 18px 16px 20px;
+      padding: 16px;
+      background:
+        radial-gradient(900px 500px at 0% 0%, #152338 0%, transparent 60%),
+        radial-gradient(850px 480px at 100% 100%, #19273a 0%, transparent 60%),
+        var(--bg);
       color: var(--text);
-      background: radial-gradient(1000px 500px at 50% 0%, #091018 0%, transparent 65%), var(--bg);
-      font-family: "Segoe UI", Roboto, sans-serif;
-      overflow-x: hidden;
+      font-family: "Segoe UI", "Trebuchet MS", sans-serif;
     }
-
-    .top {
+    .header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-top: 2px solid #0aa4ff;
-      padding-top: 14px;
-      margin-bottom: 16px;
+      margin-bottom: 12px;
+      gap: 10px;
     }
-    .title {
-      margin: 0;
-      font-size: 36px;
-      letter-spacing: 1px;
-      font-weight: 800;
-    }
-    .subtitle {
-      margin-top: 5px;
-      color: var(--muted);
-      font-size: 12px;
-      letter-spacing: 0.09em;
-      text-transform: uppercase;
-    }
-    .system-pill {
-      border: 1px solid #1f3d2a;
-      color: var(--green);
+    .title { margin: 0; font-size: 1.25rem; }
+    .subtitle { margin: 4px 0 0; color: var(--muted); font-size: 0.9rem; }
+    .pill {
+      border: 1px solid var(--line);
       border-radius: 999px;
-      padding: 9px 16px;
-      font-size: 13px;
-      background: #0b130f;
+      padding: 8px 12px;
+      font-size: 0.85rem;
+      background: #0f1826;
       white-space: nowrap;
     }
+    .pill.ok { color: var(--ok); }
+    .pill.warn { color: var(--warn); }
+    .pill.danger { color: var(--danger); }
 
-    .divider {
-      height: 1px;
-      background: var(--line);
-      margin-bottom: 18px;
-    }
-
-    .layout {
+    .grid {
       display: grid;
-      grid-template-columns: 330px 1fr 330px;
-      gap: 16px;
-      min-height: calc(100vh - 140px);
+      grid-template-columns: 330px 1fr 360px;
+      gap: 12px;
     }
-    @media (max-width: 1350px) {
-      .layout { grid-template-columns: 1fr; }
+    @media (max-width: 1250px) {
+      .grid { grid-template-columns: 1fr; }
     }
 
-    .panel {
+    .card {
+      background: linear-gradient(165deg, #121a24, #182330);
       border: 1px solid var(--line);
-      border-radius: 14px;
-      background: linear-gradient(160deg, #0a0b0f, #0c1017);
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
-      padding: 18px;
-    }
-    .panel-title {
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      font-size: 13px;
-      margin-bottom: 14px;
-      font-weight: 700;
-    }
-
-    .metric-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      padding: 16px 0;
-      border-bottom: 1px solid #1f232a;
-    }
-    .metric-row:last-of-type { border-bottom: none; }
-    .metric-k {
-      color: #b6c0cf;
-      font-size: 30px;
-      letter-spacing: 0.03em;
-    }
-    .metric-v {
-      font-size: 58px;
-      font-weight: 700;
-      line-height: 1;
-    }
-    .metric-unit {
-      color: var(--muted);
-      font-size: 26px;
-      margin-left: 6px;
-    }
-
-    .log-box {
-      margin-top: 18px;
-      background: #12151c;
-      border-radius: 10px;
-      border: 1px solid #1e232d;
+      border-radius: 12px;
       padding: 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
     }
-    .log-title {
-      color: #9ea9ba;
-      font-size: 12px;
+    .card h3 {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 0.8rem;
       text-transform: uppercase;
-      letter-spacing: 0.12em;
-      margin-bottom: 8px;
-      font-weight: 700;
-    }
-    #logFeed {
-      height: 86px;
-      overflow: hidden;
-      font-family: Consolas, monospace;
-      color: #9aa4b4;
-      font-size: 12px;
-      line-height: 1.45;
-    }
-
-    .center {
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      min-height: 700px;
-    }
-    .center-glow {
-      position: absolute;
-      width: 530px;
-      height: 530px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(0,225,96,0.15) 0%, rgba(0,225,96,0.03) 35%, transparent 70%);
-      filter: blur(10px);
-      pointer-events: none;
-    }
-
-    .soc-ring {
-      position: relative;
-      width: 300px;
-      height: 300px;
-      border-radius: 50%;
-      border: 8px solid #2c3138;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #0a0d12;
-      z-index: 2;
-      transition: box-shadow .3s ease, border-color .3s ease;
-    }
-    .soc-ring.active {
-      box-shadow: 0 0 40px rgba(0,225,96,0.22);
-      border-color: #2f8f57;
-    }
-    .soc-main {
-      font-size: 86px;
-      font-weight: 800;
-      line-height: 1;
-      text-align: center;
-    }
-    .soc-sub {
-      text-align: center;
-      color: #9da8b8;
-      font-size: 26px;
-      margin-top: 6px;
-      letter-spacing: 0.08em;
-    }
-
-    .range {
-      margin-top: 28px;
-      text-align: center;
-      z-index: 2;
-    }
-    .range-v {
-      font-size: 58px;
-      font-weight: 700;
-      line-height: 1;
-    }
-    .range-unit { color: #8e99aa; font-size: 32px; margin-left: 8px; }
-    .range-l { color: #8e99aa; font-size: 22px; letter-spacing: 0.07em; margin-top: 6px; text-transform: uppercase; }
-
-    .center-stats {
-      margin-top: 18px;
-      width: 100%;
-      max-width: 760px;
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
-      z-index: 2;
-    }
-    .mini {
-      border: 1px solid #222a34;
-      background: #0f1218;
-      border-radius: 10px;
-      padding: 10px 12px;
-    }
-    .mini-k { color: #8d98aa; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 4px; }
-    .mini-v { font-size: 20px; font-weight: 600; }
-    .ok { color: var(--green); }
-    .warn { color: var(--amber); }
-    .danger { color: var(--red); }
-
-    .controls-col {
-      display: flex;
-      flex-direction: column;
-    }
-    .btn {
-      width: 100%;
-      text-align: left;
-      border-radius: 10px;
-      padding: 16px 14px;
-      border: 1px solid #343945;
-      color: var(--text);
-      background: #1a1d25;
-      font-size: 29px;
-      font-weight: 700;
-      cursor: pointer;
-      margin-bottom: 12px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .btn:hover { background: #212735; }
-    .btn.blue { border-color: var(--blue); color: #87a4ff; background: #131d3d; }
-    .btn.red { border-color: var(--red); color: var(--red); background: #220f13; margin-top: auto; }
-    .btn.active { border-color: var(--green); color: #d5ffe8; background: #10241a; }
-
-    #diagPanel {
-      margin-top: 10px;
-      border: 1px solid #273043;
-      border-radius: 10px;
-      background: #101827;
-      padding: 10px;
-      display: none;
-    }
-    #diagPanel canvas { height: 200px !important; width: 100% !important; }
-
-    .safety-grid {
-      margin-top: 14px;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-    .safety {
-      border: 1px solid #222a34;
-      border-radius: 8px;
-      background: #101318;
-      padding: 8px;
-    }
-    .safety-k {
-      color: #8d98aa;
-      font-size: 11px;
-      text-transform: uppercase;
-      margin-bottom: 4px;
       letter-spacing: .08em;
     }
-    .safety-v {
-      font-size: 18px;
-      font-weight: 700;
+
+    .kv { display: grid; grid-template-columns: 1fr auto; gap: 6px; border-bottom: 1px solid rgba(159,176,196,.16); padding: 8px 0; }
+    .kv:last-child { border-bottom: none; }
+    .k { color: var(--muted); }
+    .v { font-weight: 600; }
+    .big { font-size: 1.45rem; }
+
+    .soc-wrap { display: grid; place-items: center; margin: 6px 0 12px; }
+    .ring {
+      width: 210px;
+      height: 210px;
+      border-radius: 50%;
+      background: conic-gradient(var(--accent) 0deg, var(--accent) 0deg, #294059 0deg 360deg);
+      display: grid;
+      place-items: center;
     }
+    .ring-inner {
+      width: 170px;
+      height: 170px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #0f1724;
+      border: 1px solid #2f435d;
+      text-align: center;
+    }
+    .soc-main { font-size: 2.7rem; font-weight: 700; line-height: 1; }
+    .soc-sub { color: var(--muted); font-size: 0.8rem; letter-spacing: .06em; }
+
+    .charts {
+      display: grid;
+      grid-template-rows: 1fr 1fr;
+      gap: 12px;
+      min-height: 560px;
+    }
+    .chart-wrap { min-height: 260px; }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .status {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #111a27;
+      padding: 8px;
+    }
+    .status .l { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: .06em; }
+    .status .s { font-size: 0.92rem; font-weight: 700; margin-top: 4px; }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .danger { color: var(--danger); }
+
+    .mode-row, .scenario-row {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .mode-row { grid-template-columns: repeat(3, 1fr); }
+    .scenario-row { grid-template-columns: repeat(2, 1fr); }
+    button {
+      border-radius: 8px;
+      border: 1px solid #31445f;
+      background: #122036;
+      color: #d8e8ff;
+      padding: 9px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.82rem;
+    }
+    button:hover { background: #1a2d4a; }
+    button.active { border-color: var(--accent); background: #1c3355; }
+    .fault-btn { border-color: #6d3f49; background: #2d161b; color: #ffdede; }
   </style>
 </head>
 <body>
-  <header class="top">
+  <div class="header">
     <div>
-      <h1 class="title">BATTERY HEALTH MONITOR</h1>
-      <div class="subtitle">TEAM 25 | HARDWARE PROTOTYPE</div>
+      <h1 class="title">EV Battery Simulator + AI BMS</h1>
+      <div class="subtitle">Physics battery model, dataset-driven traces, AI SOC control, safety limiting</div>
     </div>
-    <div id="systemPill" class="system-pill">• SYSTEM ONLINE</div>
-  </header>
+    <div id="flowBadge" class="pill ok">IDLE | NORMAL</div>
+  </div>
 
-  <div class="divider"></div>
-
-  <main class="layout">
-    <section class="panel">
-      <div class="panel-title">Live Sensors</div>
-
-      <div class="metric-row">
-        <div class="metric-k">VOLTAGE</div>
-        <div><span id="voltageV" class="metric-v">0.00</span><span class="metric-unit">V</span></div>
+  <div class="grid">
+    <section class="card">
+      <h3>State Of Charge</h3>
+      <div class="soc-wrap">
+        <div id="socRing" class="ring">
+          <div class="ring-inner">
+            <div id="socMain" class="soc-main">--</div>
+            <div class="soc-sub">AI SOC (%)</div>
+          </div>
+        </div>
       </div>
-      <div class="metric-row">
-        <div class="metric-k">CURRENT</div>
-        <div><span id="currentA" class="metric-v">0.00</span><span class="metric-unit">A</span></div>
-      </div>
-      <div class="metric-row">
-        <div class="metric-k">TEMP</div>
-        <div><span id="tempC" class="metric-v">0.0</span><span class="metric-unit">°C</span></div>
-      </div>
+      <div class="kv"><div class="k">AI SOC (raw)</div><div id="socRaw" class="v">--</div></div>
+      <div class="kv"><div class="k">True SOC</div><div id="socTrue" class="v">--</div></div>
+      <div class="kv"><div class="k">SOC Error</div><div id="socErr" class="v">--</div></div>
+      <div class="kv"><div class="k">SOH</div><div id="soh" class="v">--</div></div>
+      <div class="kv"><div class="k">Time</div><div id="timeS" class="v">--</div></div>
 
-      <div class="log-box">
-        <div class="log-title">Diagnostics Log</div>
-        <div id="logFeed">> Initializing sensors...<br>> Waiting for backend stream...</div>
+      <h3 style="margin-top:12px;">Pack Telemetry</h3>
+      <div class="kv"><div class="k">Pack Voltage</div><div id="packV" class="v big">--</div></div>
+      <div class="kv"><div class="k">Pack Current</div><div id="packI" class="v big">--</div></div>
+      <div class="kv"><div class="k">Pack Power</div><div id="packP" class="v">--</div></div>
+      <div class="kv"><div class="k">Max Temp</div><div id="tempMax" class="v">--</div></div>
+      <div class="kv"><div class="k">Cell V Range</div><div id="cellRange" class="v">--</div></div>
+    </section>
+
+    <section class="charts">
+      <div class="card chart-wrap">
+        <h3>Current Demand vs Command</h3>
+        <canvas id="currentChart"></canvas>
+      </div>
+      <div class="card chart-wrap">
+        <h3>SOC + Temperature</h3>
+        <canvas id="socChart"></canvas>
       </div>
     </section>
 
-    <section class="panel center">
-      <div class="center-glow"></div>
-
-      <div id="socRing" class="soc-ring">
-        <div>
-          <div id="socMain" class="soc-main">--</div>
-          <div class="soc-sub">% CHARGE</div>
-        </div>
+    <section class="card">
+      <h3>Safety Status</h3>
+      <div class="status-grid">
+        <div class="status"><div class="l">Current Limit</div><div id="limitCurrent" class="s ok">NORMAL</div></div>
+        <div class="status"><div class="l">Voltage Guard</div><div id="limitVoltage" class="s ok">SAFE</div></div>
+        <div class="status"><div class="l">Temp Guard</div><div id="limitTemp" class="s ok">SAFE</div></div>
+        <div class="status"><div class="l">SOC Guard</div><div id="limitSoc" class="s ok">SAFE</div></div>
       </div>
 
-      <div class="range">
-        <span id="rangeKm" class="range-v">--</span><span class="range-unit">km</span>
-        <div class="range-l">Estimated Range</div>
+      <h3>BMS Current Windows (A)</h3>
+      <div class="kv"><div class="k">Allowed</div><div id="wAllowed" class="v">--</div></div>
+      <div class="kv"><div class="k">Voltage</div><div id="wVoltage" class="v">--</div></div>
+      <div class="kv"><div class="k">Temperature</div><div id="wTemp" class="v">--</div></div>
+      <div class="kv"><div class="k">SOC</div><div id="wSoc" class="v">--</div></div>
+      <div class="kv"><div class="k">Requested -> Commanded</div><div id="reqCmd" class="v">--</div></div>
+      <div class="kv"><div class="k">Events</div><div id="events" class="v">--</div></div>
+
+      <h3 style="margin-top:12px;">Drive Mode</h3>
+      <div class="mode-row">
+        <button id="modeAuto" class="active">Auto</button>
+        <button id="modeCharge">Charge</button>
+        <button id="modeDischarge">Discharge</button>
       </div>
 
-      <div class="center-stats">
-        <div class="mini">
-          <div class="mini-k">Flow</div>
-          <div id="flowState" class="mini-v">IDLE</div>
-        </div>
-        <div class="mini">
-          <div class="mini-k">AI SOC / True SOC</div>
-          <div id="socPair" class="mini-v">-- / --</div>
-        </div>
-        <div class="mini">
-          <div class="mini-k">Pack Power</div>
-          <div id="packPower" class="mini-v">-- kW</div>
-        </div>
-        <div class="mini">
-          <div class="mini-k">State of Health</div>
-          <div id="sohVal" class="mini-v">-- %</div>
-        </div>
+      <h3 style="margin-top:12px;">Scenarios</h3>
+      <div class="scenario-row">
+        <button id="scenarioTemp" class="fault-btn">Temp Spike</button>
+        <button id="scenarioLowV" class="fault-btn">Low Voltage</button>
+        <button id="scenarioHighV" class="fault-btn">High Voltage</button>
+        <button id="scenarioClear">Clear Faults</button>
+      </div>
+
+      <h3 style="margin-top:12px;">Power Mode</h3>
+      <div class="scenario-row" style="grid-template-columns: 1fr;">
+        <button id="toggleLpm">Low Power: OFF</button>
       </div>
     </section>
-
-    <section class="panel controls-col">
-      <div class="panel-title">Control Panel</div>
-
-      <button id="btnLpm" class="btn">
-        <span>Low Power Mode</span>
-        <span id="lpmState">OFF</span>
-      </button>
-
-      <button id="btnDiag" class="btn blue">
-        <span>Run Smart Diagnostics</span>
-        <span id="diagArrow">▼</span>
-      </button>
-
-      <div id="diagPanel">
-        <canvas id="diagChart"></canvas>
-      </div>
-
-      <button id="btnOptimize" class="btn">
-        <span>Optimize Charging</span>
-        <span>⚡</span>
-      </button>
-
-      <div class="safety-grid">
-        <div class="safety">
-          <div class="safety-k">Current Limit</div>
-          <div id="limitCurrent" class="safety-v ok">SAFE</div>
-        </div>
-        <div class="safety">
-          <div class="safety-k">Voltage Limit</div>
-          <div id="limitVoltage" class="safety-v ok">SAFE</div>
-        </div>
-        <div class="safety">
-          <div class="safety-k">Temp Limit</div>
-          <div id="limitTemp" class="safety-v ok">SAFE</div>
-        </div>
-        <div class="safety">
-          <div class="safety-k">SOC Limit</div>
-          <div id="limitSoc" class="safety-v ok">SAFE</div>
-        </div>
-      </div>
-
-      <button id="btnFault" class="btn red">
-        <span>! SIMULATE FAULT</span>
-      </button>
-    </section>
-  </main>
+  </div>
 
   <script>
     const socket = io();
     let lpm = false;
-    let diagOpen = false;
-    const hist = { labels: [], req: [], cmd: [], temp: [], socAi: [] };
-    const MAX_POINTS = 70;
+    let mode = "auto";
+    const MAX_POINTS = 90;
+    const hist = { labels: [], req: [], cmd: [], socAi: [], socTrue: [], temp: [] };
 
-    const diagChart = new Chart(document.getElementById("diagChart").getContext("2d"), {
+    const currentChart = new Chart(document.getElementById("currentChart").getContext("2d"), {
       type: "line",
       data: {
         labels: hist.labels,
         datasets: [
-          { label: "Requested A", data: hist.req, borderColor: "#ffb347", borderWidth: 2, tension: .25 },
-          { label: "Commanded A", data: hist.cmd, borderColor: "#4f7bff", borderWidth: 2, tension: .25 },
-          { label: "Max Temp C", data: hist.temp, borderColor: "#ff5d5d", borderWidth: 2, tension: .25, yAxisID: "y1" },
-          { label: "AI SOC %", data: hist.socAi, borderColor: "#00e160", borderWidth: 2, tension: .25, yAxisID: "y2" }
+          { label: "Requested A", data: hist.req, borderColor: "#ffb347", borderWidth: 2, tension: 0.25 },
+          { label: "Commanded A", data: hist.cmd, borderColor: "#57adff", borderWidth: 2, tension: 0.25 }
         ]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: "#c7d2e1", boxWidth: 14 } } },
+        plugins: { legend: { labels: { color: "#c8d7ea" } } },
         scales: {
-          x: { ticks: { color: "#94a3b8" }, grid: { color: "rgba(148,163,184,.15)" } },
-          y: { ticks: { color: "#94a3b8" }, grid: { color: "rgba(148,163,184,.15)" } },
-          y1: { position: "right", min: 0, max: 80, grid: { drawOnChartArea: false }, ticks: { color: "#ff9b9b" } },
-          y2: { position: "right", min: 0, max: 100, grid: { drawOnChartArea: false }, ticks: { display: false } }
+          x: { ticks: { color: "#a8b9cf" }, grid: { color: "rgba(168,185,207,0.14)" } },
+          y: { ticks: { color: "#a8b9cf" }, grid: { color: "rgba(168,185,207,0.14)" } }
         }
       }
     });
 
-    function addLog(msg) {
-      const node = document.getElementById("logFeed");
-      const t = new Date().toLocaleTimeString([], { hour12: false });
-      node.innerHTML = `> [${t}] ${msg}<br>` + node.innerHTML;
+    const socChart = new Chart(document.getElementById("socChart").getContext("2d"), {
+      type: "line",
+      data: {
+        labels: hist.labels,
+        datasets: [
+          { label: "AI SOC %", data: hist.socAi, borderColor: "#2bd67b", borderWidth: 2, tension: 0.25 },
+          { label: "True SOC %", data: hist.socTrue, borderColor: "#57adff", borderWidth: 2, tension: 0.25 },
+          { label: "Max Temp C", data: hist.temp, borderColor: "#ff7272", borderWidth: 2, tension: 0.25, yAxisID: "y1" }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c8d7ea" } } },
+        scales: {
+          x: { ticks: { color: "#a8b9cf" }, grid: { color: "rgba(168,185,207,0.14)" } },
+          y: { min: 0, max: 100, ticks: { color: "#a8b9cf" }, grid: { color: "rgba(168,185,207,0.14)" } },
+          y1: { position: "right", min: 0, max: 90, ticks: { color: "#f5a6a6" }, grid: { drawOnChartArea: false } }
+        }
+      }
+    });
+
+    function setMode(nextMode) {
+      mode = nextMode;
+      socket.emit("set_drive_mode", { mode: nextMode });
+      document.getElementById("modeAuto").classList.toggle("active", mode === "auto");
+      document.getElementById("modeCharge").classList.toggle("active", mode === "charge");
+      document.getElementById("modeDischarge").classList.toggle("active", mode === "discharge");
     }
 
-    function setStatus(id, active, danger = false) {
+    function setStatus(id, active, danger=false) {
       const el = document.getElementById(id);
-      if (active) {
-        el.textContent = "ACTIVE";
-        el.className = `safety-v ${danger ? "danger" : "warn"}`;
-      } else {
-        el.textContent = "SAFE";
-        el.className = "safety-v ok";
+      el.className = "s " + (active ? (danger ? "danger" : "warn") : "ok");
+      el.textContent = active ? "ACTIVE" : "SAFE";
+      if (id === "limitCurrent") {
+        el.textContent = active ? "LIMITING" : "NORMAL";
       }
     }
 
-    function updateUI(p) {
-      const cellV = (p.pack_voltage_v / 96.0);
-      document.getElementById("voltageV").textContent = cellV.toFixed(2);
-      document.getElementById("currentA").textContent = Math.abs(p.command_current_a).toFixed(2);
-      document.getElementById("tempC").textContent = p.max_temp_c.toFixed(1);
+    function asWindow(w) { return `${w[0].toFixed(1)} to ${w[1].toFixed(1)}`; }
 
-      document.getElementById("socMain").textContent = Math.round(p.soc_ai_pct);
-      document.getElementById("rangeKm").textContent = Math.max(0, Math.round(p.soc_ai_pct * 3.8));
-      document.getElementById("flowState").textContent = p.flow_state;
-      document.getElementById("socPair").textContent = `${p.soc_ai_pct.toFixed(1)} / ${p.soc_true_pct.toFixed(1)}`;
-      document.getElementById("packPower").textContent = `${p.pack_power_kw.toFixed(2)} kW`;
-      document.getElementById("sohVal").textContent = `${p.soh_pct.toFixed(2)} %`;
+    socket.on("telemetry", (p) => {
+      const deg = Math.max(0, Math.min(360, (p.soc_ai_pct / 100) * 360));
+      document.getElementById("socRing").style.background = `conic-gradient(var(--accent) 0deg, var(--accent) ${deg}deg, #294059 ${deg}deg 360deg)`;
+      document.getElementById("socMain").textContent = p.soc_ai_pct.toFixed(1);
+      document.getElementById("socRaw").textContent = p.soc_ai_raw_pct == null ? "--" : `${p.soc_ai_raw_pct.toFixed(1)} %`;
+      document.getElementById("socTrue").textContent = `${p.soc_true_pct.toFixed(1)} %`;
+      document.getElementById("socErr").textContent = `${p.soc_error_pct.toFixed(2)} %`;
+      document.getElementById("soh").textContent = `${p.soh_pct.toFixed(2)} %`;
+      document.getElementById("timeS").textContent = `${p.time_s.toFixed(0)} s`;
 
-      const ring = document.getElementById("socRing");
-      ring.classList.toggle("active", p.flow_state !== "IDLE");
+      document.getElementById("packV").textContent = `${p.pack_voltage_v.toFixed(2)} V`;
+      document.getElementById("packI").textContent = `${p.command_current_a.toFixed(2)} A`;
+      document.getElementById("packP").textContent = `${p.pack_power_kw.toFixed(2)} kW`;
+      document.getElementById("tempMax").textContent = `${p.max_temp_c.toFixed(1)} C`;
+      document.getElementById("cellRange").textContent = `${p.min_cell_v.toFixed(3)} - ${p.max_cell_v.toFixed(3)} V`;
+
+      document.getElementById("wAllowed").textContent = asWindow(p.windows.allowed);
+      document.getElementById("wVoltage").textContent = asWindow(p.windows.voltage);
+      document.getElementById("wTemp").textContent = asWindow(p.windows.temp);
+      document.getElementById("wSoc").textContent = asWindow(p.windows.soc);
+      document.getElementById("reqCmd").textContent = `${p.request_current_a.toFixed(1)} A -> ${p.command_current_a.toFixed(1)} A`;
+      document.getElementById("events").textContent = p.events.length ? p.events.join(" | ") : "None";
 
       setStatus("limitCurrent", p.limits_active.current, false);
       setStatus("limitVoltage", p.limits_active.voltage, true);
       setStatus("limitTemp", p.limits_active.temperature, true);
       setStatus("limitSoc", p.limits_active.soc, false);
 
-      const pill = document.getElementById("systemPill");
-      if (p.state.includes("FAULT")) {
-        pill.textContent = "• SYSTEM FAULT";
-        pill.style.color = "#ff6262";
-        pill.style.borderColor = "#5b2727";
-      } else {
-        pill.textContent = "• SYSTEM ONLINE";
-        pill.style.color = "#00e160";
-        pill.style.borderColor = "#1f3d2a";
-      }
+      mode = p.drive_mode || mode;
+      document.getElementById("modeAuto").classList.toggle("active", mode === "auto");
+      document.getElementById("modeCharge").classList.toggle("active", mode === "charge");
+      document.getElementById("modeDischarge").classList.toggle("active", mode === "discharge");
+
+      const badge = document.getElementById("flowBadge");
+      badge.textContent = `${p.flow_state} | ${p.state}`;
+      badge.className = "pill " + (p.state.includes("FAULT") ? "danger" : (p.flow_state === "CHARGING" ? "ok" : (p.flow_state === "DISCHARGING" ? "warn" : "ok")));
 
       hist.labels.push(p.time_s.toFixed(0));
       hist.req.push(p.request_current_a);
       hist.cmd.push(p.command_current_a);
-      hist.temp.push(p.max_temp_c);
       hist.socAi.push(p.soc_ai_pct);
+      hist.socTrue.push(p.soc_true_pct);
+      hist.temp.push(p.max_temp_c);
       if (hist.labels.length > MAX_POINTS) {
         Object.keys(hist).forEach((k) => hist[k].shift());
       }
-      if (diagOpen) {
-        diagChart.update("none");
-      }
-    }
-
-    socket.on("telemetry", (p) => {
-      updateUI(p);
-      if (p.events && p.events.length) {
-        addLog(p.events.join(" | "));
-      }
+      currentChart.update("none");
+      socChart.update("none");
     });
 
-    document.getElementById("btnLpm").onclick = () => {
+    document.getElementById("modeAuto").onclick = () => setMode("auto");
+    document.getElementById("modeCharge").onclick = () => setMode("charge");
+    document.getElementById("modeDischarge").onclick = () => setMode("discharge");
+
+    document.getElementById("scenarioTemp").onclick = () => socket.emit("trigger_scenario", { scenario: "temp_spike" });
+    document.getElementById("scenarioLowV").onclick = () => socket.emit("trigger_scenario", { scenario: "low_voltage" });
+    document.getElementById("scenarioHighV").onclick = () => socket.emit("trigger_scenario", { scenario: "high_voltage" });
+    document.getElementById("scenarioClear").onclick = () => socket.emit("trigger_scenario", { scenario: "clear_faults" });
+
+    document.getElementById("toggleLpm").onclick = () => {
       lpm = !lpm;
-      document.getElementById("lpmState").textContent = lpm ? "ON" : "OFF";
-      document.getElementById("btnLpm").classList.toggle("active", lpm);
+      document.getElementById("toggleLpm").textContent = `Low Power: ${lpm ? "ON" : "OFF"}`;
+      document.getElementById("toggleLpm").classList.toggle("active", lpm);
       socket.emit("set_low_power", { enabled: lpm });
-      addLog(`Low Power Mode ${lpm ? "enabled" : "disabled"}`);
-    };
-
-    document.getElementById("btnDiag").onclick = () => {
-      diagOpen = !diagOpen;
-      document.getElementById("diagPanel").style.display = diagOpen ? "block" : "none";
-      document.getElementById("diagArrow").textContent = diagOpen ? "▲" : "▼";
-      if (diagOpen) {
-        diagChart.update();
-      }
-      addLog(diagOpen ? "Diagnostics opened" : "Diagnostics closed");
-    };
-
-    document.getElementById("btnOptimize").onclick = () => {
-      socket.emit("set_drive_mode", { mode: "charge" });
-      addLog("Optimize charging requested");
-      setTimeout(() => socket.emit("set_drive_mode", { mode: "auto" }), 6000);
-    };
-
-    document.getElementById("btnFault").onclick = () => {
-      socket.emit("trigger_scenario", { scenario: "temp_spike" });
-      addLog("Fault scenario injected: temperature spike");
     };
   </script>
 </body>

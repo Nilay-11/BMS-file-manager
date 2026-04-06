@@ -195,6 +195,8 @@ class BatteryCell:
         passive_cooling_w = self.passive_cooling_w_per_c * (self.temperature_c - ambient_c)
         net_power_w = joule_heat_w - passive_cooling_w - cooling_w
         self.temperature_c += (net_power_w * dt_s) / self.thermal_mass_j_per_c
+        # Guard against non-physical runaway values after fault injections.
+        self.temperature_c = clamp(self.temperature_c, ambient_c - 20.0, 90.0)
 
         throughput_ah = abs(delta_ah)
         self.soh = max(0.7, self.soh - throughput_ah * 2.0e-6)
@@ -205,7 +207,7 @@ class BatteryCell:
 class BatteryPack:
     cells: List[BatteryCell]
     balancing_shunt_a: float = 1.0
-    cooling_per_cell_w: float = 2.0
+    cooling_per_cell_w: float = 8.0
 
     def mean_soc(self) -> float:
         return sum(cell.soc for cell in self.cells) / len(self.cells)
