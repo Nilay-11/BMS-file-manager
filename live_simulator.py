@@ -74,7 +74,10 @@ class LiveBMSSimulator:
                     self.current_ai_enabled = False
         self.lock = threading.Lock()
         self.nominal_resistances: List[float] = [cell.internal_resistance_ohm for cell in self.pack.cells]
-        self.ai_soc_filtered: Optional[float] = None
+        # Start the estimator from known startup SOC memory to avoid large initial offset.
+        self.ai_soc_filtered: Optional[float] = self.pack.mean_soc() * 100.0
+        # Online bias tracker for AI-vs-physics residual correction.
+        self.soc_bias_pct: float = 0.0
         self.tick = 0
         self.prev_current_a = 0.0
         self.low_power_mode = False
@@ -141,10 +144,15 @@ class LiveBMSSimulator:
         coulomb_soc = self.ai_soc_filtered - delta_soc_pct
         coulomb_soc += 0.25 * max(-0.6 * dt_s, min(0.6 * dt_s, proxy_soc - coulomb_soc))
 
+        # Learn and cancel persistent estimator bias over time.
+        innovation = measured_soc - coulomb_soc
+        self.soc_bias_pct = max(-10.0, min(10.0, 0.985 * self.soc_bias_pct + 0.015 * innovation))
+        corrected_measured_soc = measured_soc - self.soc_bias_pct
+
         if fault_active:
-            blended = 0.55 * coulomb_soc + 0.15 * measured_soc + 0.30 * proxy_soc
+            blended = 0.72 * coulomb_soc + 0.10 * corrected_measured_soc + 0.18 * proxy_soc
         else:
-            blended = 0.62 * coulomb_soc + 0.25 * measured_soc + 0.13 * proxy_soc
+            blended = 0.84 * coulomb_soc + 0.10 * corrected_measured_soc + 0.06 * proxy_soc
         max_delta = max(0.25, 1.4 * dt_s)
         bounded = max(self.ai_soc_filtered - max_delta, min(self.ai_soc_filtered + max_delta, blended))
         self.ai_soc_filtered = max(0.0, min(100.0, bounded))
