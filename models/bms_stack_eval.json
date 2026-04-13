@@ -1,0 +1,36 @@
+{
+  "steps": 900,
+  "ai_soc_for_control": false,
+  "baseline": {
+    "mode": "profile_request_only",
+    "steps": 900,
+    "mean_soc_abs_error_pct": 3.411311111111111,
+    "p95_soc_abs_error_pct": 7.18,
+    "mean_current_tracking_error_a": 0.0,
+    "current_limited_steps": 0,
+    "fault_steps": 0,
+    "avg_pack_power_kw": 25.14618888888889,
+    "peak_temp_c": 28.48,
+    "mean_command_current_a": 64.08947777777777
+  },
+  "ai_current_control": {
+    "mode": "ai_current_control",
+    "steps": 900,
+    "mean_soc_abs_error_pct": 3.1547222222222224,
+    "p95_soc_abs_error_pct": 6.68,
+    "mean_current_tracking_error_a": 0.0,
+    "current_limited_steps": 0,
+    "fault_steps": 0,
+    "avg_pack_power_kw": 24.404766666666667,
+    "peak_temp_c": 29.16,
+    "mean_command_current_a": 62.15262222222222
+  },
+  "delta": {
+    "mean_soc_abs_error_pct": -0.25658888888888853,
+    "mean_current_tracking_error_a": 0.0,
+    "fault_steps": 0,
+    "current_limited_steps": 0,
+    "avg_pack_power_kw": -0.7414222222222229,
+    "peak_temp_c": 0.6799999999999997
+  }
+}

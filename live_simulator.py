@@ -4,10 +4,12 @@ import math
 import random
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import pandas as pd
 
+from ai_bms_controller import AIBMSCurrentController
 from simulated_bms import BMSController, create_simulated_pack
 from soc_ai import RealWorldSocModel
 
@@ -19,6 +21,9 @@ class RuntimeConfig:
     parallel_groups: int = 40
     telemetry_dataset_path: str = "distributed_bms_dataset.csv"
     soc_model_path: str = "models/soc_model_v2.joblib"
+    current_controller_model_path: str = "models/current_controller_v1.joblib"
+    use_ai_for_control: bool = False
+    use_ai_current_control: bool = True
 
 
 class RealWorldDriveProfile:
@@ -56,6 +61,17 @@ class LiveBMSSimulator:
 
         self.bms = BMSController()
         self.ai = RealWorldSocModel.load(config.soc_model_path)
+        self.current_ai: Optional[AIBMSCurrentController] = None
+        self.current_ai_enabled = False
+        if config.use_ai_current_control:
+            controller_path = Path(config.current_controller_model_path)
+            if controller_path.exists():
+                try:
+                    self.current_ai = AIBMSCurrentController.load(str(controller_path))
+                    self.current_ai_enabled = True
+                except Exception:
+                    self.current_ai = None
+                    self.current_ai_enabled = False
         self.lock = threading.Lock()
         self.nominal_resistances: List[float] = [cell.internal_resistance_ohm for cell in self.pack.cells]
         self.ai_soc_filtered: Optional[float] = None
@@ -89,33 +105,48 @@ class LiveBMSSimulator:
             self.drive_mode = mode
 
     @staticmethod
-    def _voltage_soc_proxy(avg_cell_v: float) -> float:
-        # Robust proxy used to stabilize AI output under outlier/fault conditions.
-        return max(0.0, min(100.0, ((avg_cell_v - 3.45) / (4.15 - 3.45)) * 100.0))
+    def _voltage_soc_proxy(avg_cell_v: float, temp_c: float) -> float:
+        # Invert the simulator OCV curve so proxy SOC matches the battery model domain.
+        best_soc = 0.0
+        best_err = float("inf")
+        for i in range(101):
+            soc = i / 100.0
+            modeled_v = 3.68 + (0.52 * soc) + (0.06 * math.tanh((soc - 0.35) * 4.0))
+            modeled_v += -0.0015 * (25.0 - temp_c)
+            err = abs(modeled_v - avg_cell_v)
+            if err < best_err:
+                best_err = err
+                best_soc = soc
+        return best_soc * 100.0
 
     def _stabilize_ai_soc(
         self,
         raw_soc_pct: Optional[float],
         avg_cell_v: float,
+        temp_c: float,
         dt_s: float,
         fault_active: bool,
+        prev_current_a: float,
+        effective_capacity_ah: float,
     ) -> float:
-        proxy_soc = self._voltage_soc_proxy(avg_cell_v)
-        if raw_soc_pct is None:
-            raw = self.ai_soc_filtered if self.ai_soc_filtered is not None else proxy_soc
-        else:
-            raw = max(0.0, min(100.0, float(raw_soc_pct)))
+        proxy_soc = self._voltage_soc_proxy(avg_cell_v, temp_c=temp_c)
+        measured_soc = proxy_soc if raw_soc_pct is None else max(0.0, min(100.0, float(raw_soc_pct)))
 
         if self.ai_soc_filtered is None:
-            self.ai_soc_filtered = raw
+            self.ai_soc_filtered = 0.65 * measured_soc + 0.35 * proxy_soc
             return self.ai_soc_filtered
 
-        max_delta = max(0.2, 1.2 * dt_s)
-        bounded = max(self.ai_soc_filtered - max_delta, min(self.ai_soc_filtered + max_delta, raw))
+        capacity_ah = max(5.0, effective_capacity_ah)
+        delta_soc_pct = (prev_current_a * dt_s / 3600.0) / capacity_ah * 100.0
+        coulomb_soc = self.ai_soc_filtered - delta_soc_pct
+        coulomb_soc += 0.25 * max(-0.6 * dt_s, min(0.6 * dt_s, proxy_soc - coulomb_soc))
+
         if fault_active:
-            bounded = 0.8 * bounded + 0.2 * proxy_soc
+            blended = 0.55 * coulomb_soc + 0.15 * measured_soc + 0.30 * proxy_soc
         else:
-            bounded = 0.9 * bounded + 0.1 * proxy_soc
+            blended = 0.62 * coulomb_soc + 0.25 * measured_soc + 0.13 * proxy_soc
+        max_delta = max(0.25, 1.4 * dt_s)
+        bounded = max(self.ai_soc_filtered - max_delta, min(self.ai_soc_filtered + max_delta, blended))
         self.ai_soc_filtered = max(0.0, min(100.0, bounded))
         return self.ai_soc_filtered
 
@@ -156,14 +187,18 @@ class LiveBMSSimulator:
             t_s = self.tick * self.config.dt_s
             profile = self.profile.next_row()
             ambient_c = profile["temperature_c"] + 0.3 * math.sin(t_s / 240.0)
-            requested_current_a = self._requested_current(profile["current_a"])
+            base_requested_current_a = self._requested_current(profile["current_a"])
+            requested_current_a = base_requested_current_a
 
-            avg_cell_v = sum(cell.terminal_voltage(self.prev_current_a) for cell in self.pack.cells) / len(
-                self.pack.cells
-            )
+            sensed_voltages = [cell.terminal_voltage(self.prev_current_a) for cell in self.pack.cells]
+            avg_cell_v = sum(sensed_voltages) / len(self.pack.cells)
+            sensed_min_cell_v = min(sensed_voltages)
+            sensed_max_cell_v = max(sensed_voltages)
             max_temp_c = max(self.pack.max_temperature_c(), profile["temperature_c"])
             avg_soh_pct = (sum(c.soh for c in self.pack.cells) / len(self.pack.cells)) * 100.0
             cell_current_a = self.prev_current_a / max(1, self.config.parallel_groups)
+            mean_res_ohm = sum(c.internal_resistance_ohm for c in self.pack.cells) / max(1, len(self.pack.cells))
+            ocv_estimate_v = avg_cell_v + (cell_current_a * mean_res_ohm)
             cell_power_kw = max(0.0, (abs(cell_current_a) * avg_cell_v) / 1000.0)
 
             ai_soc_pct = self.ai.predict_soc_pct(
@@ -178,17 +213,42 @@ class LiveBMSSimulator:
                 anomaly_score_pct=profile["anomaly_score_pct"],
             )
             ai_soc_raw_pct = ai_soc_pct
+            effective_capacity_ah = sum(
+                max(0.5, cell.capacity_ah * cell.soh) for cell in self.pack.cells
+            ) / max(1, len(self.pack.cells))
             ai_soc_pct = self._stabilize_ai_soc(
                 raw_soc_pct=ai_soc_raw_pct,
-                avg_cell_v=avg_cell_v,
+                avg_cell_v=ocv_estimate_v,
+                temp_c=max_temp_c,
                 dt_s=self.config.dt_s,
                 fault_active=bool(self.bms.fault_reason),
+                prev_current_a=self.prev_current_a,
+                effective_capacity_ah=effective_capacity_ah,
             )
+            ai_request_current_a: Optional[float] = None
+            if self.current_ai is not None:
+                ai_request_current_a = self.current_ai.suggest_current(
+                    base_request_current_a=base_requested_current_a,
+                    prev_current_a=self.prev_current_a,
+                    avg_cell_v=avg_cell_v,
+                    min_cell_v=sensed_min_cell_v,
+                    max_cell_v=sensed_max_cell_v,
+                    max_temp_c=max_temp_c,
+                    soc_ai_pct=ai_soc_pct,
+                    soh_pct=avg_soh_pct,
+                    anomaly_score_pct=profile["anomaly_score_pct"],
+                    converter_command_pct=profile["converter_command_pct"],
+                    latency_ms=profile["latency_ms"],
+                    low_power_mode=self.low_power_mode,
+                    drive_mode=self.drive_mode,
+                )
+                requested_current_a = ai_request_current_a
 
+            control_soc_pct = ai_soc_pct if self.config.use_ai_for_control else None
             command = self.bms.command(
                 requested_current_a=requested_current_a,
                 pack=self.pack,
-                soc_estimate_pct=ai_soc_pct,
+                soc_estimate_pct=control_soc_pct,
             )
             # Keep user-selected charge/discharge intent when safety windows allow it.
             if self.drive_mode == "charge" and command.current_a > 0.0 and command.allowed_window_a[0] < -0.5:
@@ -199,6 +259,10 @@ class LiveBMSSimulator:
                 command.current_a = min(command.allowed_window_a[1], abs(requested_current_a))
                 if "CURRENT_LIMITED" not in command.events:
                     command.events.append("CURRENT_LIMITED")
+            if not self.config.use_ai_for_control:
+                command.events.append("AI_PREDICTOR_ONLY")
+            if ai_request_current_a is not None:
+                command.events.append("AI_CURRENT_CONTROL")
             cell_voltages = self.pack.step(
                 pack_current_a=command.current_a,
                 ambient_c=ambient_c,
@@ -230,6 +294,9 @@ class LiveBMSSimulator:
                 "drive_mode": self.drive_mode,
                 "low_power_mode": self.low_power_mode,
                 "flow_state": flow_state,
+                "control_source": "ai_current" if ai_request_current_a is not None else "drive_profile",
+                "base_request_current_a": round(base_requested_current_a, 2),
+                "ai_request_current_a": round(ai_request_current_a, 2) if ai_request_current_a is not None else None,
                 "request_current_a": round(requested_current_a, 2),
                 "command_current_a": round(command.current_a, 2),
                 "pack_voltage_v": round(pack_voltage_v, 2),
@@ -270,6 +337,8 @@ class LiveBMSSimulator:
                     "converter_command_pct": round(profile["converter_command_pct"], 2),
                     "latency_ms": round(profile["latency_ms"], 2),
                 },
+                "ai_for_control": self.config.use_ai_for_control,
+                "ai_current_control": ai_request_current_a is not None,
             }
 
             self.latest_state = packet

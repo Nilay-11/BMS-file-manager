@@ -1,0 +1,15 @@
+{
+  "rows_total": 18900,
+  "rows_train": 15120,
+  "rows_test": 3780,
+  "feature_count": 13,
+  "best_model": "etr",
+  "rmse_a": 0.15067090832858124,
+  "mae_a": 0.02260878414938661,
+  "mean_abs_tracking_error_a": 0.02260878414938661,
+  "max_step_delta_a": 25.42684356450442,
+  "target_current_minmax_a": [
+    -90.0,
+    96.78018730246632
+  ]
+}

@@ -14,29 +14,44 @@ class RealWorldSocModel:
     model_path: str
     history: Deque[Dict[str, float]]
     artifact: Dict[str, object]
+    format_version: str
     feature_cols: List[str]
     base_features: List[str]
     lag_config: Dict[str, List[int]]
     roll_config: Dict[str, List[int]]
     max_lag: int
+    model: Optional[object]
+    ensemble_members: List[Dict[str, object]]
 
     @classmethod
     def load(cls, model_path: str) -> "RealWorldSocModel":
         artifact = joblib.load(model_path)
-        if artifact.get("format_version") != "soc_model_v2":
+        format_version = str(artifact.get("format_version", ""))
+        if format_version not in {"soc_model_v2", "soc_model_v3"}:
             raise RuntimeError(f"Unsupported SOC model artifact format: {artifact.get('format_version')}")
         lag_config = artifact["lag_config"]
         max_lag = int(artifact.get("max_lag", max(max(v) for v in lag_config.values())))
         history = deque(maxlen=max(128, max_lag + 16))
+        model = artifact.get("model")
+        ensemble_members = []
+        if format_version == "soc_model_v3":
+            ensemble_members = list(artifact.get("members", []))
+            if not ensemble_members:
+                raise RuntimeError("soc_model_v3 artifact has no ensemble members.")
+        elif model is None:
+            raise RuntimeError("soc_model_v2 artifact is missing the `model` field.")
         return cls(
             model_path=model_path,
             history=history,
             artifact=artifact,
+            format_version=format_version,
             feature_cols=list(artifact["feature_cols"]),
             base_features=list(artifact["base_features"]),
             lag_config={k: list(v) for k, v in lag_config.items()},
             roll_config={k: list(v) for k, v in artifact["roll_config"].items()},
             max_lag=max_lag,
+            model=model,
+            ensemble_members=ensemble_members,
         )
 
     def _build_feature_row(self) -> Optional[Dict[str, float]]:
@@ -92,5 +107,21 @@ class RealWorldSocModel:
             return None
 
         x = pd.DataFrame([row], columns=self.feature_cols)
-        pred = self.artifact["model"].predict(x)
+        if self.format_version == "soc_model_v3":
+            pred_value = 0.0
+            weight_sum = 0.0
+            for member in self.ensemble_members:
+                weight = float(member.get("weight", 0.0))
+                model = member.get("model")
+                if model is None or weight <= 0.0:
+                    continue
+                pred_value += weight * float(model.predict(x)[0])
+                weight_sum += weight
+            if weight_sum <= 0.0:
+                return None
+            return float(np.clip(pred_value / weight_sum, 0.0, 100.0))
+
+        if self.model is None:
+            return None
+        pred = self.model.predict(x)
         return float(np.clip(pred[0], 0.0, 100.0))
