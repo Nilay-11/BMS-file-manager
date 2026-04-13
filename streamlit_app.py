@@ -114,7 +114,7 @@ with h1:
     st.markdown('<p class="hdr-title">BATTERY HEALTH MONITOR</p>', unsafe_allow_html=True)
     st.markdown('<p class="hdr-sub">TEAM 25 | HARDWARE PROTOTYPE</p>', unsafe_allow_html=True)
 with h2:
-    state_text = "â€¢ SYSTEM FAULT" if "FAULT" in packet["state"] else "â€¢ SYSTEM ONLINE"
+    state_text = "SYSTEM FAULT" if "FAULT" in packet["state"] else "SYSTEM ONLINE"
     pill_color = "#ff4c4c" if "FAULT" in packet["state"] else "#00e160"
     pill_border = "#5b2727" if "FAULT" in packet["state"] else "#1f3d2a"
     st.markdown(
@@ -132,7 +132,7 @@ with left:
     sensor_rows = [
         ("VOLTAGE", f"{cell_v:.2f} V"),
         ("CURRENT", f"{packet['command_current_a']:.2f} A"),
-        ("TEMP", f"{packet['max_temp_c']:.1f} Â°C"),
+        ("TEMP", f"{packet['max_temp_c']:.1f} C"),
     ]
     for k, v in sensor_rows:
         c1, c2 = st.columns([1, 1])
@@ -210,12 +210,12 @@ with right:
         add_log(f"Low power mode {'enabled' if st.session_state.low_power else 'disabled'}")
 
     if st.button(
-        "Run Smart Diagnostics " + ("â–²" if st.session_state.show_diag else "â–¼"),
+        "Run Smart Diagnostics " + ("[ON]" if st.session_state.show_diag else "[OFF]"),
         use_container_width=True,
     ):
         st.session_state.show_diag = not st.session_state.show_diag
 
-    if st.button("Optimize Charging âš¡", use_container_width=True):
+    if st.button("Optimize Charging", use_container_width=True):
         st.session_state.drive_mode = "charge"
         add_log("Optimize charging activated")
 
@@ -246,7 +246,7 @@ with right:
         unsafe_allow_html=True,
     )
     st.markdown(
-        f'<p class="btn-note">Requested {packet["request_current_a"]:.1f} A â†’ Commanded {packet["command_current_a"]:.1f} A</p>',
+        f'<p class="btn-note">Requested {packet["request_current_a"]:.1f} A -> Commanded {packet["command_current_a"]:.1f} A</p>',
         unsafe_allow_html=True,
     )
     st.markdown("</div>", unsafe_allow_html=True)
